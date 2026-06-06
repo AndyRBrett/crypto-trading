@@ -15,6 +15,7 @@ import os
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
+from .sentiment import DEFAULT_FEEDS
 from .strategy import StrategyConfig
 
 
@@ -53,6 +54,13 @@ class Config:
     # Claude trade explanations.
     explanations_enabled: bool = True
     explain_model: str = "claude-opus-4-8"
+
+    # News sentiment (optional; needs ANTHROPIC_API_KEY + network).
+    sentiment_enabled: bool = False
+    sentiment_model: str = "claude-opus-4-8"
+    sentiment_cache_ttl: int = 1800  # seconds to reuse a sentiment score
+    sentiment_max_headlines: int = 15
+    news_feeds: list[str] = field(default_factory=lambda: list(DEFAULT_FEEDS))
 
     # Persistence / output.
     db_path: str = "trading.db"

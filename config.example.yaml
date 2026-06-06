@@ -18,17 +18,31 @@ candle_granularity: ONE_HOUR   # ONE_MINUTE / FIVE_MINUTE / FIFTEEN_MINUTE / ONE
 candle_count: 100
 data_source: public            # "public" (no keys) or "coinbase_advanced" (uses your keys)
 
-# Strategy: SMA crossover gated by RSI.
+# Strategy: SMA crossover gated by RSI (and, optionally, news sentiment).
 strategy:
   fast_period: 12
   slow_period: 26
   rsi_period: 14
   rsi_overbought: 70
   rsi_oversold: 30
+  sentiment_buy_veto: -0.4      # block BUYs when news sentiment <= this
+  sentiment_sell_trigger: -0.6  # risk-off SELL when news sentiment <= this
 
 # Claude trade explanations.
 explanations_enabled: true
 explain_model: claude-opus-4-8   # falls back to a templated rationale if no API key
+
+# News sentiment: Claude scores recent headlines and folds the result into
+# signals (confirms/vetoes price-based decisions; never invents a BUY on its
+# own). Needs ANTHROPIC_API_KEY + network. Off by default.
+sentiment_enabled: false
+sentiment_model: claude-opus-4-8
+sentiment_cache_ttl: 1800        # seconds to reuse a score before refetching
+sentiment_max_headlines: 15
+news_feeds:
+  - https://www.coindesk.com/arc/outboundfeeds/rss/
+  - https://cointelegraph.com/rss
+  - https://decrypt.co/feed
 
 # Persistence / output.
 db_path: trading.db

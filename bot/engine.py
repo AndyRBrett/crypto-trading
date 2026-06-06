@@ -17,6 +17,7 @@ from .config import Config
 from .explain import Explainer
 from .market_data import MarketData
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
+from .sentiment import SentimentAnalyzer
 from .storage import Storage
 from .strategy import BUY, HOLD, SELL, Strategy
 
@@ -30,12 +31,16 @@ class Engine:
         market_data: MarketData | None = None,
         storage: Storage | None = None,
         explainer: Explainer | None = None,
+        sentiment_analyzer: SentimentAnalyzer | None = None,
     ):
         self.config = config
         self.market_data = market_data or MarketData(config)
         self.storage = storage or Storage(config.db_path)
         self.strategy = Strategy(config.strategy)
         self.explainer = explainer or Explainer(config)
+        self.analyzer = sentiment_analyzer
+        if self.analyzer is None and config.sentiment_enabled:
+            self.analyzer = SentimentAnalyzer(config)
 
         # Resume by replaying the persisted trade log.
         trades = self.storage.load_trades()
@@ -63,7 +68,16 @@ class Engine:
                 log.warning("No candles for %s", product_id)
                 continue
 
-            signal = self.strategy.generate_signal(product_id, candles)
+            sentiment = None
+            if self.analyzer is not None:
+                try:
+                    sentiment = self.analyzer.analyze(product_id)
+                except Exception as exc:
+                    log.warning("sentiment analyze failed for %s: %s", product_id, exc)
+
+            signal = self.strategy.generate_signal(
+                product_id, candles, sentiment=sentiment
+            )
             price = signal.price
             prices[product_id] = price
             self.latest_signals[product_id] = {
@@ -72,6 +86,7 @@ class Engine:
                 "strength": signal.strength,
                 "reasons": signal.reasons,
                 "indicators": signal.indicators,
+                "sentiment": sentiment.to_dict() if sentiment else None,
             }
             log.info(
                 "%s: %s @ $%.2f (%s)",

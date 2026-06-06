@@ -61,6 +61,7 @@ Indicator snapshot:
 - Fast SMA({ind.get('fast_period')}): {ind.get('fast_sma')}
 - Slow SMA({ind.get('slow_period')}): {ind.get('slow_sma')}
 - RSI({ind.get('rsi_period')}): {ind.get('rsi')}
+{f"- News sentiment: {ind.get('sentiment_label')} ({ind.get('sentiment_score')})" if 'sentiment_score' in ind else ""}
 
 Portfolio after the trade:
 - Cash: ${portfolio.cash:,.2f}

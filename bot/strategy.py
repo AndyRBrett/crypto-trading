@@ -42,6 +42,9 @@ class StrategyConfig:
     rsi_period: int = 14
     rsi_overbought: float = 70.0
     rsi_oversold: float = 30.0
+    # News-sentiment gating (only applied when a Sentiment is supplied).
+    sentiment_buy_veto: float = -0.4  # block BUYs when sentiment <= this
+    sentiment_sell_trigger: float = -0.6  # risk-off SELL when sentiment <= this
 
 
 class Strategy:
@@ -54,7 +57,9 @@ class Strategy:
         # +1 so we can also compute the *previous* SMAs for crossover detection.
         return max(c.slow_period, c.rsi_period + 1) + 1
 
-    def generate_signal(self, product_id: str, candles: Sequence[dict]) -> Signal:
+    def generate_signal(
+        self, product_id: str, candles: Sequence[dict], sentiment=None
+    ) -> Signal:
         c = self.config
         closes = [float(candle["close"]) for candle in candles]
         price = closes[-1] if closes else 0.0
@@ -123,6 +128,33 @@ class Strategy:
             reasons.append(
                 f"No crossover. Fast SMA {trend} slow SMA; RSI {rsi_val:.1f} is neutral."
             )
+
+        # Fold in news sentiment, if available. Sentiment confirms or vetoes the
+        # price-based decision; it never invents a BUY on its own.
+        if sentiment is not None:
+            snapshot["sentiment_score"] = round(sentiment.score, 3)
+            snapshot["sentiment_label"] = sentiment.label
+            if action == BUY and sentiment.score <= c.sentiment_buy_veto:
+                action = HOLD
+                strength = 0.0
+                reasons.append(
+                    f"Vetoed BUY: news sentiment bearish "
+                    f"({sentiment.score:+.2f}) — {sentiment.summary}"
+                )
+            elif action != BUY and sentiment.score <= c.sentiment_sell_trigger:
+                if action != SELL:
+                    reasons.append(
+                        f"Risk-off SELL: news sentiment strongly bearish "
+                        f"({sentiment.score:+.2f}) — {sentiment.summary}"
+                    )
+                action = SELL
+                strength = max(strength, min(1.0, abs(sentiment.score)))
+            else:
+                reasons.append(
+                    f"News sentiment {sentiment.label} ({sentiment.score:+.2f})."
+                )
+                if action == BUY and sentiment.score > 0:
+                    strength = min(1.0, strength + 0.2)
 
         return Signal(
             product_id=product_id,

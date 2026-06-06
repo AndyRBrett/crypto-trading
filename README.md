@@ -6,7 +6,8 @@ money, ever. Each trade is explained in plain English by **Claude**, and a
 static dashboard shows your equity curve, positions, and the bot's reasoning.
 
 > Status: **v1**. Local Python loop · SMA-crossover + RSI strategy ·
-> Claude trade explanations · static dashboard.
+> optional Claude news-sentiment signals · Claude trade explanations ·
+> static dashboard.
 
 ---
 
@@ -39,7 +40,8 @@ bot/
   config.py        config from config.yaml + .env (secrets)
   market_data.py   Coinbase: public API (default) or Advanced SDK (your keys)
   indicators.py    SMA / EMA / RSI  (pure, unit-tested)
-  strategy.py      SMA crossover + RSI filter -> signals with reasons
+  sentiment.py     RSS news -> Claude sentiment score (optional)
+  strategy.py      SMA crossover + RSI filter (+ sentiment) -> signals
   portfolio.py     paper portfolio: cash, positions, cost basis, P&L
   storage.py       SQLite (durable) + dashboard JSON export
   explain.py       Claude trade explanations (+ deterministic fallback)
@@ -91,6 +93,24 @@ Put secrets in `.env` (gitignored):
 > free — so your keys are optional. They're wired in for when you want to use
 > the same authenticated feed you'd trade against live.
 
+## News sentiment (optional)
+
+With `sentiment_enabled: true` and an `ANTHROPIC_API_KEY`, the bot pulls recent
+crypto headlines (keyless RSS feeds), asks Claude to score near-term sentiment
+for each asset (-1 bearish … +1 bullish), and folds that into the signal:
+
+- A bullish/neutral score **confirms** a price-based BUY (and nudges its
+  strength); sentiment never invents a BUY on its own.
+- A sufficiently bearish score **vetoes** a BUY (`sentiment_buy_veto`).
+- A strongly bearish score **triggers a risk-off SELL** of an open position
+  (`sentiment_sell_trigger`).
+
+Scores are cached for `sentiment_cache_ttl` seconds so short poll intervals
+don't hammer the feeds or the API, and every failure (no key, no network, no
+relevant headlines) degrades to neutral — the bot keeps trading on price alone.
+The score and Claude's one-line summary show up in the dashboard and in each
+trade's explanation.
+
 ## CLI
 
 | Command  | What it does                                        |
@@ -133,7 +153,7 @@ basis, P&L, restart-replay), and the strategy's signal logic.
 
 ## Roadmap
 
-- [ ] **LLM news sentiment** — pull crypto headlines, have Claude score
+- [x] **LLM news sentiment** — pull crypto headlines, have Claude score
       sentiment, feed it into the signal.
 - [ ] **Natural-language strategy config** — "be aggressive when BTC dominance
       is rising" compiled into rules.

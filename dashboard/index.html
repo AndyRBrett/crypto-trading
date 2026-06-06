@@ -122,9 +122,12 @@ function renderSignals(s) {
   const entries = Object.entries(s.latest_signals || {});
   if (!entries.length) { el.innerHTML = '<div class="empty">No signals yet.</div>'; return; }
   el.innerHTML = `<table><thead><tr>
-      <th>Market</th><th>Signal</th><th>Price</th><th>Fast SMA</th><th>Slow SMA</th><th>RSI</th><th>Why</th>
+      <th>Market</th><th>Signal</th><th>Price</th><th>Fast SMA</th><th>Slow SMA</th><th>RSI</th><th>Sentiment</th><th>Why</th>
     </tr></thead><tbody>` + entries.map(([pid, sig]) => {
       const ind = sig.indicators || {};
+      const sent = sig.sentiment
+        ? `${sig.sentiment.label} (${sig.sentiment.score >= 0 ? "+" : ""}${sig.sentiment.score})`
+        : "—";
       return `<tr>
         <td>${pid}</td>
         <td><span class="badge ${sig.action}">${sig.action}</span></td>
@@ -132,6 +135,7 @@ function renderSignals(s) {
         <td class="mono">${ind.fast_sma ?? "—"}</td>
         <td class="mono">${ind.slow_sma ?? "—"}</td>
         <td class="mono">${ind.rsi ?? "—"}</td>
+        <td>${sent}</td>
         <td>${(sig.reasons || []).join(" ")}</td>
       </tr>`;
     }).join("") + `</tbody></table>`;
@@ -154,7 +158,7 @@ function renderTrades(s) {
         <span class="when">${ago(t.timestamp)}</span>
       </div>
       <p class="explain">${t.explanation || (t.reasons || []).join(" ")}</p>
-      <div class="meta">fast SMA ${ind.fast_sma ?? "—"} · slow SMA ${ind.slow_sma ?? "—"} · RSI ${ind.rsi ?? "—"} · fee ${fmtUSD(t.fee)}</div>
+      <div class="meta">fast SMA ${ind.fast_sma ?? "—"} · slow SMA ${ind.slow_sma ?? "—"} · RSI ${ind.rsi ?? "—"}${ind.sentiment_label ? ` · sentiment ${ind.sentiment_label} (${ind.sentiment_score})` : ""} · fee ${fmtUSD(t.fee)}</div>
     </div>`;
   }).join("");
 }
