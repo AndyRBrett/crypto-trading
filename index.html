@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Crypto Paper Trading Bot</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#0f1419" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="CryptoBot" />
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a2029; --border: #2a313c;
+    --text: #e6e9ef; --muted: #8a93a2; --green: #2ecc71; --red: #e74c3c;
+    --accent: #4aa3ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 18px 24px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  header .updated { color: var(--muted); font-size: 12px; }
+  main { padding: 24px; max-width: 1100px; margin: 0 auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .card .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+  section { margin-bottom: 28px; }
+  section h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { color: var(--muted); font-weight: 500; }
+  .badge { padding: 2px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+  .badge.BUY { background: rgba(46,204,113,.15); color: var(--green); }
+  .badge.SELL { background: rgba(231,76,60,.15); color: var(--red); }
+  .badge.HOLD { background: rgba(138,147,162,.15); color: var(--muted); }
+  .trade { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+  .trade .top { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .trade .when { color: var(--muted); font-size: 12px; }
+  .trade .explain { margin: 10px 0 0; }
+  .trade .meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+  canvas { width: 100%; height: 220px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+  .empty { color: var(--muted); padding: 16px 0; }
+  .mono { font-variant-numeric: tabular-nums; }
+  .table-wrap, #positions, #signals { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  @media (max-width: 640px) {
+    body { font-size: 13px; }
+    header { padding: 14px 16px; padding-top: max(14px, env(safe-area-inset-top)); }
+    header h1 { font-size: 16px; }
+    main { padding: 16px; }
+    .cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .card .value { font-size: 18px; }
+    th, td { padding: 6px 8px; font-size: 12px; white-space: nowrap; }
+    canvas { height: 180px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🤖 Crypto Paper Trading Bot</h1>
+  <span class="updated" id="updated">loading…</span>
+</header>
+<main>
+  <div class="cards" id="cards"></div>
+
+  <section>
+    <h2>Equity curve</h2>
+    <canvas id="chart" width="1040" height="220"></canvas>
+  </section>
+
+  <section>
+    <h2>Positions</h2>
+    <div id="positions"></div>
+  </section>
+
+  <section>
+    <h2>Latest signals</h2>
+    <div id="signals"></div>
+  </section>
+
+  <section>
+    <h2>Trade log &amp; explanations</h2>
+    <div id="trades"></div>
+  </section>
+</main>
+
+<script>
+const fmtUSD = (n) => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const fmtNum = (n, d = 6) => Number(n).toLocaleString(undefined, {maximumFractionDigits: d});
+const cls = (n) => (n >= 0 ? "pos" : "neg");
+const ago = (ts) => {
+  const s = Math.floor(Date.now() / 1000 - ts);
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.floor(s / 60) + "m ago";
+  if (s < 86400) return Math.floor(s / 3600) + "h ago";
+  return Math.floor(s / 86400) + "d ago";
+};
+
+function card(label, value, klass = "") {
+  return `<div class="card"><div class="label">${label}</div><div class="value ${klass}">${value}</div></div>`;
+}
+
+function renderCards(s) {
+  document.getElementById("cards").innerHTML = [
+    card("Equity", fmtUSD(s.equity)),
+    card("Total return", (s.total_return_pct >= 0 ? "+" : "") + s.total_return_pct.toFixed(2) + "%", cls(s.total_return_pct)),
+    card("Cash", fmtUSD(s.cash)),
+    card("Market value", fmtUSD(s.market_value)),
+    card("Realized P&L", fmtUSD(s.realized_pnl), cls(s.realized_pnl)),
+    card("Unrealized P&L", fmtUSD(s.unrealized_pnl), cls(s.unrealized_pnl)),
+  ].join("");
+}
+
+function renderPositions(s) {
+  const el = document.getElementById("positions");
+  if (!s.positions || !s.positions.length) { el.innerHTML = '<div class="empty">No open positions.</div>'; return; }
+  el.innerHTML = `<table><thead><tr>
+      <th>Market</th><th>Qty</th><th>Avg price</th><th>Price</th><th>Value</th><th>Unrealized P&L</th>
+    </tr></thead><tbody>` + s.positions.map(p => `<tr>
+      <td>${p.product_id}</td>
+      <td class="mono">${fmtNum(p.quantity)}</td>
+      <td class="mono">${fmtUSD(p.avg_price)}</td>
+      <td class="mono">${fmtUSD(p.price)}</td>
+      <td class="mono">${fmtUSD(p.value)}</td>
+      <td class="mono ${cls(p.unrealized_pnl)}">${fmtUSD(p.unrealized_pnl)}</td>
+    </tr>`).join("") + `</tbody></table>`;
+}
+
+function renderSignals(s) {
+  const el = document.getElementById("signals");
+  const entries = Object.entries(s.latest_signals || {});
+  if (!entries.length) { el.innerHTML = '<div class="empty">No signals yet.</div>'; return; }
+  el.innerHTML = `<table><thead><tr>
+      <th>Market</th><th>Signal</th><th>Price</th><th>Fast SMA</th><th>Slow SMA</th><th>RSI</th><th>Sentiment</th><th>Why</th>
+    </tr></thead><tbody>` + entries.map(([pid, sig]) => {
+      const ind = sig.indicators || {};
+      const sent = sig.sentiment
+        ? `${sig.sentiment.label} (${sig.sentiment.score >= 0 ? "+" : ""}${sig.sentiment.score})`
+        : "—";
+      return `<tr>
+        <td>${pid}</td>
+        <td><span class="badge ${sig.action}">${sig.action}</span></td>
+        <td class="mono">${fmtUSD(sig.price)}</td>
+        <td class="mono">${ind.fast_sma ?? "—"}</td>
+        <td class="mono">${ind.slow_sma ?? "—"}</td>
+        <td class="mono">${ind.rsi ?? "—"}</td>
+        <td>${sent}</td>
+        <td>${(sig.reasons || []).join(" ")}</td>
+      </tr>`;
+    }).join("") + `</tbody></table>`;
+}
+
+function renderTrades(s) {
+  const el = document.getElementById("trades");
+  if (!s.trades || !s.trades.length) { el.innerHTML = '<div class="empty">No trades yet. The bot trades when a signal fires.</div>'; return; }
+  el.innerHTML = s.trades.map(t => {
+    const ind = t.indicators || {};
+    const pnl = t.side === "SELL" ? ` · realized ${fmtUSD(t.realized_pnl)}` : "";
+    return `<div class="trade">
+      <div class="top">
+        <div>
+          <span class="badge ${t.side}">${t.side}</span>
+          <strong>${t.product_id}</strong>
+          <span class="mono">${fmtNum(t.quantity)} @ ${fmtUSD(t.price)}</span>
+          <span class="when">(${fmtUSD(t.notional)}${pnl})</span>
+        </div>
+        <span class="when">${ago(t.timestamp)}</span>
+      </div>
+      <p class="explain">${t.explanation || (t.reasons || []).join(" ")}</p>
+      <div class="meta">fast SMA ${ind.fast_sma ?? "—"} · slow SMA ${ind.slow_sma ?? "—"} · RSI ${ind.rsi ?? "—"}${ind.sentiment_label ? ` · sentiment ${ind.sentiment_label} (${ind.sentiment_score})` : ""} · fee ${fmtUSD(t.fee)}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderChart(s) {
+  const c = document.getElementById("chart");
+  const ctx = c.getContext("2d");
+  const w = c.width, h = c.height, pad = 30;
+  ctx.clearRect(0, 0, w, h);
+  const curve = (s.equity_curve || []).map(p => p.equity);
+  if (curve.length < 2) {
+    ctx.fillStyle = "#8a93a2"; ctx.font = "13px sans-serif";
+    ctx.fillText("Not enough data yet — equity curve appears after a few ticks.", pad, h / 2);
+    return;
+  }
+  const min = Math.min(...curve), max = Math.max(...curve);
+  const range = max - min || 1;
+  const x = (i) => pad + (i / (curve.length - 1)) * (w - 2 * pad);
+  const y = (v) => h - pad - ((v - min) / range) * (h - 2 * pad);
+
+  // baseline (starting cash) if in range
+  const base = s.starting_cash;
+  if (base >= min && base <= max) {
+    ctx.strokeStyle = "#2a313c"; ctx.setLineDash([4, 4]); ctx.beginPath();
+    ctx.moveTo(pad, y(base)); ctx.lineTo(w - pad, y(base)); ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  const up = curve[curve.length - 1] >= curve[0];
+  ctx.strokeStyle = up ? "#2ecc71" : "#e74c3c";
+  ctx.lineWidth = 2; ctx.beginPath();
+  curve.forEach((v, i) => { i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)); });
+  ctx.stroke();
+
+  ctx.fillStyle = "#8a93a2"; ctx.font = "11px sans-serif";
+  ctx.fillText(fmtUSD(max), 2, y(max) + 4);
+  ctx.fillText(fmtUSD(min), 2, y(min) + 4);
+}
+
+async function refresh() {
+  try {
+    const res = await fetch("state.json?t=" + Date.now());
+    if (!res.ok) throw new Error("state.json not found");
+    const s = await res.json();
+    document.getElementById("updated").textContent = "updated " + ago(s.updated_at);
+    renderCards(s); renderChart(s); renderPositions(s); renderSignals(s); renderTrades(s);
+  } catch (e) {
+    document.getElementById("updated").textContent = "waiting for bot output (state.json)…";
+  }
+}
+refresh();
+setInterval(refresh, 5000);
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
