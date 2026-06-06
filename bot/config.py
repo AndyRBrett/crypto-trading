@@ -66,10 +66,17 @@ class Config:
     db_path: str = "trading.db"
     dashboard_state_path: str = "dashboard/state.json"
 
+    # Publish state to GitHub Pages so a phone can view the dashboard remotely.
+    publish_enabled: bool = False
+    publish_repo: str = ""  # "owner/repo", e.g. "AndyRBrett/crypto-trading"
+    publish_branch: str = "gh-pages"
+    publish_path: str = "state.json"
+
     # Secrets (populated from env, never written to disk by us).
     coinbase_api_key: str = ""
     coinbase_api_secret: str = ""
     anthropic_api_key: str = ""
+    github_token: str = ""
 
     @classmethod
     def load(cls, path: str = "config.yaml") -> "Config":
@@ -95,4 +102,5 @@ class Config:
         cfg.coinbase_api_key = os.environ.get("COINBASE_API_KEY", "")
         cfg.coinbase_api_secret = os.environ.get("COINBASE_API_SECRET", "")
         cfg.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        cfg.github_token = os.environ.get("GITHUB_TOKEN", "")
         return cfg
