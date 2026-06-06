@@ -1,0 +1,31 @@
+name: Deploy dashboard to GitHub Pages
+
+# Publishes the static dashboard (dashboard/) to the gh-pages branch whenever
+# it changes on main. The running bot separately pushes state.json to the same
+# branch each tick (via the GitHub API), so keep_files preserves it here.
+
+on:
+  push:
+    branches: [main]
+    paths: ["dashboard/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish dashboard/ to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dashboard
+          publish_branch: gh-pages
+          keep_files: true

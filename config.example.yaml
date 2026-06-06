@@ -47,3 +47,11 @@ news_feeds:
 # Persistence / output.
 db_path: trading.db
 dashboard_state_path: dashboard/state.json
+
+# Publish to GitHub Pages so you can view the dashboard on your phone.
+# The bot pushes state.json to the gh-pages branch each tick; GitHub Pages
+# serves it at https://<your-user>.github.io/<repo>/ . Needs GITHUB_TOKEN.
+publish_enabled: false
+publish_repo: ""          # "owner/repo", e.g. AndyRBrett/crypto-trading
+publish_branch: gh-pages
+publish_path: state.json

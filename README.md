@@ -45,10 +45,12 @@ bot/
   portfolio.py     paper portfolio: cash, positions, cost basis, P&L
   storage.py       SQLite (durable) + dashboard JSON export
   explain.py       Claude trade explanations (+ deterministic fallback)
+  publish.py       push state.json to GitHub Pages (phone viewing)
   engine.py        one tick: data -> signal -> trade -> explain -> persist
   main.py          CLI: once / run / status / verify / reset
 dashboard/
-  index.html       static dashboard (reads state.json)
+  index.html       static PWA dashboard (reads state.json)
+  manifest.json    sw.js   make_icons.py   icon-*.png   (installable on phone)
 tests/             unit tests for indicators, portfolio, strategy
 ```
 
@@ -110,6 +112,40 @@ don't hammer the feeds or the API, and every failure (no key, no network, no
 relevant headlines) degrades to neutral — the bot keeps trading on price alone.
 The score and Claude's one-line summary show up in the dashboard and in each
 trade's explanation.
+
+## View it on your phone
+
+The dashboard is a PWA and can be hosted free on GitHub Pages — the bot pushes
+its `state.json` to a `gh-pages` branch each tick, and you open the page on your
+phone (and "Add to Home Screen" to get an app icon).
+
+One-time setup:
+
+1. **Create a token.** GitHub → Settings → Developer settings → Fine-grained
+   personal access tokens. Scope it to this repo with **Contents: Read and
+   write**. Put it in `.env` as `GITHUB_TOKEN=...`.
+
+2. **Enable publishing** in `config.yaml`:
+
+   ```yaml
+   publish_enabled: true
+   publish_repo: AndyRBrett/crypto-trading   # your owner/repo
+   ```
+
+3. **Prime the Pages branch.** Run the bot once so it pushes the first
+   `state.json`, and trigger the dashboard deploy (the
+   "Deploy dashboard to GitHub Pages" workflow → *Run workflow*, or just push
+   any change under `dashboard/`).
+
+4. **Turn on Pages.** Repo → Settings → Pages → Source: **Deploy from a
+   branch** → Branch: **gh-pages** / **/(root)** → Save.
+
+Then open `https://<your-user>.github.io/<repo>/` on your phone and add it to
+your home screen. It refreshes every few seconds and works offline (showing the
+last fetched state). The data updates whenever the bot is running and pushing.
+
+> The bot must be running somewhere to push fresh data (your laptop, for now).
+> See the roadmap for always-on hosting.
 
 ## CLI
 

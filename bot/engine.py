@@ -17,6 +17,7 @@ from .config import Config
 from .explain import Explainer
 from .market_data import MarketData
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
+from .publish import Publisher
 from .sentiment import SentimentAnalyzer
 from .storage import Storage
 from .strategy import BUY, HOLD, SELL, Strategy
@@ -32,6 +33,7 @@ class Engine:
         storage: Storage | None = None,
         explainer: Explainer | None = None,
         sentiment_analyzer: SentimentAnalyzer | None = None,
+        publisher: Publisher | None = None,
     ):
         self.config = config
         self.market_data = market_data or MarketData(config)
@@ -41,6 +43,7 @@ class Engine:
         self.analyzer = sentiment_analyzer
         if self.analyzer is None and config.sentiment_enabled:
             self.analyzer = SentimentAnalyzer(config)
+        self.publisher = publisher or Publisher(config)
 
         # Resume by replaying the persisted trade log.
         trades = self.storage.load_trades()
@@ -114,6 +117,8 @@ class Engine:
                 prices,
                 self.latest_signals,
             )
+            if self.publisher.enabled:
+                self.publisher.publish(self.config.dashboard_state_path)
         return executed
 
     def _maybe_trade(self, signal, price: float):
