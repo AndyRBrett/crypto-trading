@@ -208,36 +208,87 @@ function renderTrades(s) {
 
 function renderChart(s) {
   const c = document.getElementById("chart");
+  // Crisp + responsive: size the backing store to the displayed box.
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth || 1040;
+  const h = c.clientHeight || 220;
+  c.width = Math.round(w * dpr);
+  c.height = Math.round(h * dpr);
   const ctx = c.getContext("2d");
-  const w = c.width, h = c.height, pad = 30;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const curve = (s.equity_curve || []).map(p => p.equity);
+
+  const pts = s.equity_curve || [];
+  const curve = pts.map(p => p.equity);
   if (curve.length < 2) {
-    ctx.fillStyle = "#8a93a2"; ctx.font = "13px sans-serif";
-    ctx.fillText("Not enough data yet — equity curve appears after a few ticks.", pad, h / 2);
+    ctx.fillStyle = "#8a93a2"; ctx.font = "14px system-ui, sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText("Not enough data yet — the curve appears after a few ticks.", 16, h / 2);
     return;
   }
-  const min = Math.min(...curve), max = Math.max(...curve);
-  const range = max - min || 1;
-  const x = (i) => pad + (i / (curve.length - 1)) * (w - 2 * pad);
-  const y = (v) => h - pad - ((v - min) / range) * (h - 2 * pad);
 
-  // baseline (starting cash) if in range
+  const padL = 66, padR = 14, padT = 36, padB = 26;
   const base = s.starting_cash;
-  if (base >= min && base <= max) {
-    ctx.strokeStyle = "#2a313c"; ctx.setLineDash([4, 4]); ctx.beginPath();
-    ctx.moveTo(pad, y(base)); ctx.lineTo(w - pad, y(base)); ctx.stroke(); ctx.setLineDash([]);
+  let min = Math.min(...curve), max = Math.max(...curve);
+  if (base >= min && base <= max) { /* keep */ } else { min = Math.min(min, base); max = Math.max(max, base); }
+  const span = (max - min) || (max * 0.01) || 1;
+  const lo = min - span * 0.10, hi = max + span * 0.10, range = hi - lo;
+  const x = (i) => padL + (i / (curve.length - 1)) * (w - padL - padR);
+  const y = (v) => padT + (1 - (v - lo) / range) * (h - padT - padB);
+
+  // Horizontal gridlines + $ labels.
+  ctx.font = "11px system-ui, sans-serif"; ctx.textBaseline = "middle";
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const val = lo + (range * i) / ticks, yy = y(val);
+    ctx.strokeStyle = "#222a35"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(w - padR, yy); ctx.stroke();
+    ctx.fillStyle = "#8a93a2"; ctx.textAlign = "right";
+    ctx.fillText(fmtUSD(val), padL - 8, yy);
   }
 
-  const up = curve[curve.length - 1] >= curve[0];
-  ctx.strokeStyle = up ? "#2ecc71" : "#e74c3c";
-  ctx.lineWidth = 2; ctx.beginPath();
+  // Starting-cash baseline.
+  if (base >= lo && base <= hi) {
+    ctx.strokeStyle = "#5a6678"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, y(base)); ctx.lineTo(w - padR, y(base)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#7b8698"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+    ctx.fillText("start " + fmtUSD(base), padL + 4, y(base) - 3);
+  }
+
+  const last = curve[curve.length - 1];
+  const up = last >= base;
+  const color = up ? "#2ecc71" : "#e74c3c";
+
+  // Shaded area under the line.
+  const grad = ctx.createLinearGradient(0, padT, 0, h - padB);
+  grad.addColorStop(0, up ? "rgba(46,204,113,0.22)" : "rgba(231,76,60,0.22)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.beginPath();
+  curve.forEach((v, i) => { i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)); });
+  ctx.lineTo(x(curve.length - 1), h - padB); ctx.lineTo(x(0), h - padB); ctx.closePath();
+  ctx.fillStyle = grad; ctx.fill();
+
+  // The line + endpoint dot.
+  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = "round";
+  ctx.beginPath();
   curve.forEach((v, i) => { i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)); });
   ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(x(curve.length - 1), y(last), 3.5, 0, Math.PI * 2); ctx.fill();
 
-  ctx.fillStyle = "#8a93a2"; ctx.font = "11px sans-serif";
-  ctx.fillText(fmtUSD(max), 2, y(max) + 4);
-  ctx.fillText(fmtUSD(min), 2, y(min) + 4);
+  // Time markers (oldest .. now).
+  ctx.fillStyle = "#8a93a2"; ctx.font = "11px system-ui, sans-serif"; ctx.textBaseline = "alphabetic";
+  if (pts[0] && pts[0].timestamp) { ctx.textAlign = "left"; ctx.fillText(ago(pts[0].timestamp), padL, h - 8); }
+  ctx.textAlign = "right"; ctx.fillText("now", w - padR, h - 8);
+
+  // Current value + % change (top-left).
+  const pct = base ? (last / base - 1) * 100 : 0;
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillStyle = "#e6e9ee"; ctx.font = "600 17px system-ui, sans-serif";
+  ctx.fillText(fmtUSD(last), padL, 8);
+  ctx.fillStyle = color; ctx.font = "12px system-ui, sans-serif";
+  ctx.fillText((pct >= 0 ? "▲ +" : "▼ ") + pct.toFixed(2) + "%", padL + ctx.measureText(fmtUSD(last)).width + 12, 12);
 }
 
 async function refresh() {
