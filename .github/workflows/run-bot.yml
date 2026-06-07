@@ -1,11 +1,10 @@
 name: Run trading bot (always-on)
 
 # Runs the bot in the cloud on a schedule, so the dashboard stays fresh without
-# your laptop. Each run is a fresh machine, so the paper portfolio (trading.db)
-# is restored from / saved to a dedicated `bot-state` branch between ticks.
-#
-# state.json is pushed to gh-pages by the bot itself (via the built-in
-# GITHUB_TOKEN), exactly like it does on your laptop.
+# your laptop. The bot itself (via the built-in GITHUB_TOKEN) pulls the shared
+# portfolio (trading.db) from the bot-state branch at startup and pushes it back
+# after the tick, and publishes state.json to gh-pages. If your laptop is
+# actively driving (a fresh lease in driver.json), the cloud stands down.
 
 on:
   schedule:
@@ -39,35 +38,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Restore portfolio state
-        run: |
-          git fetch origin bot-state || true
-          if git show origin/bot-state:trading.db > trading.db 2>/dev/null; then
-            echo "Restored trading.db from bot-state branch."
-          else
-            rm -f trading.db
-            echo "No prior state found; starting a fresh paper portfolio."
-          fi
-
       - name: Run one tick
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python -m bot.main once --config config.ci.yaml
-
-      - name: Save portfolio state
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          cp trading.db /tmp/trading.db
-          rm -f trading.db
-          if git rev-parse --verify origin/bot-state >/dev/null 2>&1; then
-            git checkout -B bot-state origin/bot-state
-          else
-            git checkout --orphan bot-state
-            git rm -rf . >/dev/null 2>&1 || true
-          fi
-          cp /tmp/trading.db trading.db
-          git add trading.db
-          git commit -m "Update portfolio state [skip ci]" || { echo "No state changes to commit."; exit 0; }
-          git push origin bot-state

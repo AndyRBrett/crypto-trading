@@ -73,3 +73,14 @@ publish_enabled: false
 publish_repo: ""          # "owner/repo", e.g. AndyRBrett/crypto-trading
 publish_branch: gh-pages
 publish_path: state.json
+
+# Driver coordination: let your laptop take priority over the cloud and share
+# ONE continuous portfolio between them. To make your laptop the fast driver,
+# set publish_enabled: true + publish_repo above, then enable this. Needs
+# GITHUB_TOKEN. The cloud (config.ci.yaml) uses driver_role: cloud.
+coordinate_enabled: false
+driver_role: local        # this machine is the laptop driver
+lease_ttl_seconds: 1800   # cloud stands down while this laptop was seen < 30 min ago
+state_branch: bot-state   # shared branch holding trading.db + driver.json
+state_db_path: trading.db
+lease_path: driver.json

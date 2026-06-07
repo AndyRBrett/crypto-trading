@@ -173,9 +173,34 @@ Setup:
 
 Notes:
 - Cron timing is approximate (GitHub may delay a run by several minutes).
-- The cloud and your laptop keep **separate** portfolios. Pick one as your
-  "real" run — if the cloud is on, you don't need the local loop.
 - Edit `config.ci.yaml` to change what the cloud bot trades or how it behaves.
+
+## Laptop as the fast driver (optional)
+
+GitHub's schedule is best-effort and often only fires every hour or two. When
+your laptop is on you can drive faster (every 15 min) and have the cloud
+automatically step aside — sharing **one continuous portfolio** so P&L never
+jumps. This is the `coordinate_*` settings (see `bot/coordinate.py`):
+
+- The shared portfolio (`trading.db`) and a lease (`driver.json`) live on the
+  `bot-state` branch. Both drivers pull the DB at startup and push it after each
+  tick, via the GitHub API.
+- While your laptop runs it refreshes the lease every tick. The cloud checks the
+  lease at the start of each run and **stands down** while a local lease is fresh
+  (`lease_ttl_seconds`, default 30 min), then resumes automatically once you've
+  been gone longer than that.
+
+To make your laptop the fast driver, set in `config.yaml`:
+
+```yaml
+publish_enabled: true
+publish_repo: AndyRBrett/crypto-trading
+coordinate_enabled: true
+driver_role: local
+```
+
+(plus `GITHUB_TOKEN` in `.env`), then `python -m bot.main run`. The cloud config
+(`config.ci.yaml`) already has `coordinate_enabled: true` / `driver_role: cloud`.
 
 ## CLI
 
