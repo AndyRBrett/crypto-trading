@@ -1,151 +1,103 @@
-"""Market data access.
+"""Market data via CCXT — a unified interface to 100+ exchanges.
 
-Two backends, selected by ``config.data_source``:
+The exchange is selected by ``config.exchange`` (any CCXT exchange id, default
+``"coinbase"``). Credentials are optional: if ``COINBASE_API_KEY`` /
+``COINBASE_API_SECRET`` are present they are forwarded for authenticated access;
+otherwise the public REST API is used with no keys required.
 
-  * "public" (default) — Coinbase's public Exchange API. No auth required,
-    works immediately, and returns the same prices used for paper fills.
-  * "coinbase_advanced" — the official ``coinbase-advanced-py`` SDK using your
-    CDP API key + secret. Useful to verify your keys work and to use the same
-    data feed you'd trade against live.
-
-Both return candles as a list of dicts ordered oldest -> newest:
+Candles are returned oldest → newest as dicts:
     {"time": int, "open": float, "high": float, "low": float,
      "close": float, "volume": float}
 """
 
 from __future__ import annotations
 
-import time
 from typing import Sequence
 
-import requests
+import ccxt
 
-PUBLIC_BASE = "https://api.exchange.coinbase.com"
-
-# Map Advanced-Trade granularity names to Exchange API seconds.
-_GRANULARITY_SECONDS = {
-    "ONE_MINUTE": 60,
-    "FIVE_MINUTE": 300,
-    "FIFTEEN_MINUTE": 900,
-    "ONE_HOUR": 3600,
-    "SIX_HOUR": 21600,
-    "ONE_DAY": 86400,
+_TIMEFRAMES: dict[str, str] = {
+    "ONE_MINUTE": "1m",
+    "FIVE_MINUTE": "5m",
+    "FIFTEEN_MINUTE": "15m",
+    "THIRTY_MINUTE": "30m",
+    "ONE_HOUR": "1h",
+    "TWO_HOUR": "2h",
+    "SIX_HOUR": "6h",
+    "ONE_DAY": "1d",
 }
+
+# Module-level cache so load_markets() is called once per (exchange, auth) pair.
+_exchange_cache: dict[tuple, ccxt.Exchange] = {}
 
 
 class MarketDataError(Exception):
     pass
 
 
+def _symbol(product_id: str) -> str:
+    """Convert Coinbase-style product id to a CCXT symbol: BTC-USD → BTC/USD."""
+    return product_id.replace("-", "/")
+
+
+def _make_exchange(exchange_id: str, api_key: str = "", api_secret: str = "") -> ccxt.Exchange:
+    cache_key = (exchange_id, bool(api_key))
+    if cache_key not in _exchange_cache:
+        cls = getattr(ccxt, exchange_id, None)
+        if cls is None:
+            raise MarketDataError(f"Unknown CCXT exchange id: {exchange_id!r}")
+        params: dict = {}
+        if api_key and api_secret:
+            params = {"apiKey": api_key, "secret": api_secret}
+        _exchange_cache[cache_key] = cls(params)
+    return _exchange_cache[cache_key]
+
+
 class MarketData:
     def __init__(self, config):
         self.config = config
-        self._rest_client = None  # lazy Advanced-Trade client
-        self._session = requests.Session()
-        self._session.headers.update({"User-Agent": "crypto-paper-bot/0.1"})
 
-    # -- public Exchange API ----------------------------------------------
-
-    def _public_candles(self, product_id: str, granularity: str, count: int):
-        seconds = _GRANULARITY_SECONDS.get(granularity, 3600)
-        end = int(time.time())
-        start = end - seconds * count
-        url = f"{PUBLIC_BASE}/products/{product_id}/candles"
-        resp = self._session.get(
-            url,
-            params={"granularity": seconds, "start": start, "end": end},
-            timeout=15,
+    def _exchange(self) -> ccxt.Exchange:
+        return _make_exchange(
+            self.config.exchange,
+            self.config.coinbase_api_key,
+            self.config.coinbase_api_secret,
         )
-        resp.raise_for_status()
-        # Exchange returns [[time, low, high, open, close, volume], ...] newest first.
-        rows = resp.json()
+
+    def get_candles(
+        self, product_id: str, granularity: str | None = None, count: int | None = None
+    ) -> list[dict]:
+        granularity = granularity or self.config.candle_granularity
+        count = count or self.config.candle_count
+        timeframe = _TIMEFRAMES.get(granularity, "1h")
+        symbol = _symbol(product_id)
+        try:
+            raw = self._exchange().fetch_ohlcv(symbol, timeframe=timeframe, limit=count)
+        except ccxt.BaseError as exc:
+            raise MarketDataError(f"fetch_ohlcv failed for {symbol}: {exc}") from exc
+        # CCXT returns [[timestamp_ms, open, high, low, close, volume], ...] oldest → newest.
         candles = [
             {
-                "time": int(r[0]),
-                "low": float(r[1]),
-                "high": float(r[2]),
-                "open": float(r[3]),
-                "close": float(r[4]),
-                "volume": float(r[5]),
+                "time": int(row[0]) // 1000,
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": float(row[5]),
             }
-            for r in rows
+            for row in raw
         ]
         candles.sort(key=lambda c: c["time"])
         return candles[-count:]
 
-    def _public_price(self, product_id: str) -> float:
-        url = f"{PUBLIC_BASE}/products/{product_id}/ticker"
-        resp = self._session.get(url, timeout=15)
-        resp.raise_for_status()
-        return float(resp.json()["price"])
-
-    # -- Advanced Trade SDK ------------------------------------------------
-
-    def _client(self):
-        if self._rest_client is None:
-            try:
-                from coinbase.rest import RESTClient
-            except ImportError as exc:  # pragma: no cover - import guard
-                raise MarketDataError(
-                    "coinbase-advanced-py not installed. Run "
-                    "`pip install coinbase-advanced-py` or set data_source: public."
-                ) from exc
-            if not (self.config.coinbase_api_key and self.config.coinbase_api_secret):
-                raise MarketDataError(
-                    "COINBASE_API_KEY / COINBASE_API_SECRET not set; "
-                    "cannot use data_source: coinbase_advanced."
-                )
-            self._rest_client = RESTClient(
-                api_key=self.config.coinbase_api_key,
-                api_secret=self.config.coinbase_api_secret,
-            )
-        return self._rest_client
-
-    def _advanced_candles(self, product_id: str, granularity: str, count: int):
-        seconds = _GRANULARITY_SECONDS.get(granularity, 3600)
-        end = int(time.time())
-        start = end - seconds * count
-        resp = self._client().get_candles(
-            product_id=product_id,
-            start=str(start),
-            end=str(end),
-            granularity=granularity,
-        )
-        raw = getattr(resp, "candles", None)
-        if raw is None and isinstance(resp, dict):
-            raw = resp.get("candles", [])
-        candles = []
-        for c in raw or []:
-            get = c.get if isinstance(c, dict) else lambda k, _c=c: getattr(_c, k)
-            candles.append(
-                {
-                    "time": int(get("start", 0)),
-                    "low": float(get("low", 0)),
-                    "high": float(get("high", 0)),
-                    "open": float(get("open", 0)),
-                    "close": float(get("close", 0)),
-                    "volume": float(get("volume", 0)),
-                }
-            )
-        candles.sort(key=lambda c: c["time"])
-        return candles[-count:]
-
-    # -- public interface --------------------------------------------------
-
-    def get_candles(
-        self, product_id: str, granularity: str | None = None, count: int | None = None
-    ):
-        granularity = granularity or self.config.candle_granularity
-        count = count or self.config.candle_count
-        if self.config.data_source == "coinbase_advanced":
-            return self._advanced_candles(product_id, granularity, count)
-        return self._public_candles(product_id, granularity, count)
-
     def get_price(self, product_id: str) -> float:
-        """Latest price. Falls back to the most recent candle close."""
+        """Latest price from the exchange ticker, falling back to the last candle close."""
+        symbol = _symbol(product_id)
         try:
-            if self.config.data_source == "public":
-                return self._public_price(product_id)
+            ticker = self._exchange().fetch_ticker(symbol)
+            price = ticker.get("last") or ticker.get("close")
+            if price:
+                return float(price)
         except Exception:
             pass
         candles = self.get_candles(product_id, count=2)
@@ -157,9 +109,9 @@ class MarketData:
         return {pid: self.get_price(pid) for pid in product_ids}
 
     def verify_credentials(self) -> bool:
-        """Best-effort check that Coinbase Advanced keys authenticate."""
+        """Best-effort check that the configured exchange keys authenticate."""
         try:
-            self._client().get_accounts()
+            self._exchange().fetch_balance()
             return True
         except Exception:
             return False
