@@ -332,7 +332,7 @@ function emaSeries(vals, period) {
 function renderMainChart(s) {
   const title = document.getElementById("chartTitle");
   if (selectedCoin === "ALL") { title.textContent = "Equity curve"; renderEquityChart(s); }
-  else { title.textContent = selectedCoin + " — price & trend"; renderPriceChart(s, selectedCoin); }
+  else { title.textContent = selectedCoin + " · 1h candles"; renderPriceChart(s, selectedCoin); }
 }
 
 function renderPriceChart(s, coin) {
@@ -344,24 +344,32 @@ function renderPriceChart(s, coin) {
   const legend = document.getElementById("legend");
 
   const hist = (s.price_history || {})[coin] || [];
-  const closes = hist.map(p => p.c);
-  if (closes.length < 2) {
+  if (hist.length < 2) {
     legend.innerHTML = "";
     ctx.fillStyle = "#8a93a2"; ctx.font = "14px system-ui, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
     ctx.fillText("No price history yet for " + coin + " — appears after a tick or two.", 16, h / 2);
     return;
   }
+  // OHLC (fall back to close for older data that only stored closes).
+  const closes = hist.map(p => p.c);
+  const opens = hist.map(p => (p.o != null ? p.o : p.c));
+  const highs = hist.map(p => (p.h != null ? p.h : p.c));
+  const lows = hist.map(p => (p.l != null ? p.l : p.c));
+
   const ind = ((s.latest_signals || {})[coin] || {}).indicators || {};
   const fastP = ind.fast_period, slowP = ind.slow_period;
   const fast = emaSeries(closes, fastP), slow = emaSeries(closes, slowP);
   const trend = ind.trend_ma;
 
   const padL = 66, padR = 14, padT = 36, padB = 26;
-  const min = Math.min(...closes), max = Math.max(...closes);
+  const n = hist.length;
+  const min = Math.min(...lows), max = Math.max(...highs);
   const span = (max - min) || (max * 0.01) || 1;
-  const lo = min - span * 0.10, hi = max + span * 0.10, range = hi - lo;
-  const x = (i) => padL + (i / (closes.length - 1)) * (w - padL - padR);
+  const lo = min - span * 0.08, hi = max + span * 0.08, range = hi - lo;
+  const plotW = w - padL - padR;
+  const cx = (i) => padL + (i + 0.5) / n * plotW;   // candle center
   const y = (v) => padT + (1 - (v - lo) / range) * (h - padT - padB);
+  const cw = Math.max(1, (plotW / n) * 0.65);        // candle body width
 
   // Gridlines + $ labels.
   ctx.font = "11px system-ui, sans-serif"; ctx.textBaseline = "middle";
@@ -377,18 +385,27 @@ function renderPriceChart(s, coin) {
     ctx.moveTo(padL, y(trend)); ctx.lineTo(w - padR, y(trend)); ctx.stroke(); ctx.setLineDash([]);
   }
 
+  // Candlesticks: wick (high→low) + body (open→close), green up / red down.
+  for (let i = 0; i < n; i++) {
+    const upBar = closes[i] >= opens[i];
+    const color = upBar ? "#2ecc71" : "#e74c3c";
+    const x = cx(i);
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, y(highs[i])); ctx.lineTo(x, y(lows[i])); ctx.stroke();
+    const yo = y(opens[i]), yc = y(closes[i]);
+    let bh = Math.abs(yc - yo); if (bh < 1) bh = 1;
+    ctx.fillStyle = color; ctx.fillRect(x - cw / 2, Math.min(yo, yc), cw, bh);
+  }
+
+  // EMA overlays through the candle centers.
   const drawLine = (series, color, width) => {
     ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = "round"; ctx.beginPath();
     let started = false;
-    series.forEach((v, i) => { if (v == null) return; if (!started) { ctx.moveTo(x(i), y(v)); started = true; } else ctx.lineTo(x(i), y(v)); });
+    series.forEach((v, i) => { if (v == null) return; if (!started) { ctx.moveTo(cx(i), y(v)); started = true; } else ctx.lineTo(cx(i), y(v)); });
     ctx.stroke();
   };
-  drawLine(closes, "#cfd6e0", 2);
   if (fast.length) drawLine(fast, "#4aa3ff", 1.5);
   if (slow.length) drawLine(slow, "#f0a35e", 1.5);
-
-  const last = closes[closes.length - 1];
-  ctx.fillStyle = "#cfd6e0"; ctx.beginPath(); ctx.arc(x(closes.length - 1), y(last), 3.5, 0, Math.PI * 2); ctx.fill();
 
   // Time markers.
   ctx.fillStyle = "#8a93a2"; ctx.font = "11px system-ui, sans-serif"; ctx.textBaseline = "alphabetic";
@@ -396,15 +413,15 @@ function renderPriceChart(s, coin) {
   ctx.textAlign = "right"; ctx.fillText("now", w - padR, h - 8);
 
   // Current price + % change across the window.
-  const first = closes[0], pct = first ? (last / first - 1) * 100 : 0;
-  const up = last >= first, col = up ? "#2ecc71" : "#e74c3c";
+  const last = closes[n - 1], first = closes[0], pct = first ? (last / first - 1) * 100 : 0;
+  const upAll = last >= first, col = upAll ? "#2ecc71" : "#e74c3c";
   ctx.textAlign = "left"; ctx.textBaseline = "top";
   ctx.fillStyle = "#e6e9ee"; ctx.font = "600 17px system-ui, sans-serif"; ctx.fillText(fmtUSD(last), padL, 8);
   ctx.fillStyle = col; ctx.font = "12px system-ui, sans-serif";
   ctx.fillText((pct >= 0 ? "▲ +" : "▼ ") + pct.toFixed(2) + "% (window)", padL + ctx.measureText(fmtUSD(last)).width + 12, 12);
 
   // Legend.
-  let lg = `<span style="color:#cfd6e0">price</span>`;
+  let lg = `<span style="color:#2ecc71">up</span><span style="color:#e74c3c">down</span>`;
   if (fast.length) lg += `<span style="color:#4aa3ff">EMA ${fastP}</span>`;
   if (slow.length) lg += `<span style="color:#f0a35e">EMA ${slowP}</span>`;
   if (trend != null) lg += `<span style="color:#9aa4b2">trend ${fmtUSD(trend)}</span>`;

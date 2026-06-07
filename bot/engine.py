@@ -88,9 +88,15 @@ class Engine:
                 log.warning("No candles for %s", product_id)
                 continue
 
-            # Recent closes for the dashboard's per-coin price chart.
+            # Recent OHLC for the dashboard's per-coin candlestick chart.
             price_history[product_id] = [
-                {"t": int(c["time"]), "c": round(float(c["close"]), 2)}
+                {
+                    "t": int(c["time"]),
+                    "o": round(float(c["open"]), 2),
+                    "h": round(float(c["high"]), 2),
+                    "l": round(float(c["low"]), 2),
+                    "c": round(float(c["close"]), 2),
+                }
                 for c in candles[-120:]
             ]
 
