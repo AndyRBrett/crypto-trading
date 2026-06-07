@@ -52,7 +52,8 @@
   canvas { width: 100%; height: 220px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
   .empty { color: var(--muted); padding: 16px 0; }
   .mono { font-variant-numeric: tabular-nums; }
-  .table-wrap, #positions, #signals { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .table-wrap, #positions, #signals, #activity { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .hint { color: var(--muted); font-size: 12px; margin: -4px 0 10px; }
   @media (max-width: 640px) {
     body { font-size: 13px; }
     header { padding: 14px 16px; padding-top: max(14px, env(safe-area-inset-top)); }
@@ -86,6 +87,12 @@
   <section>
     <h2>Latest signals</h2>
     <div id="signals"></div>
+  </section>
+
+  <section>
+    <h2>Activity log</h2>
+    <p class="hint">Every check the bot makes is recorded here — including HOLDs. If this list is growing, the bot is alive and watching the market.</p>
+    <div id="activity"></div>
   </section>
 
   <section>
@@ -162,6 +169,21 @@ function renderSignals(s) {
     }).join("") + `</tbody></table>`;
 }
 
+function renderActivity(s) {
+  const el = document.getElementById("activity");
+  const items = s.activity || [];
+  if (!items.length) { el.innerHTML = '<div class="empty">No activity recorded yet.</div>'; return; }
+  el.innerHTML = `<table><thead><tr>
+      <th>When</th><th>Market</th><th>Decision</th><th>Price</th><th>Why</th>
+    </tr></thead><tbody>` + items.map(a => `<tr>
+      <td class="when">${ago(a.timestamp)}</td>
+      <td>${a.product_id}</td>
+      <td><span class="badge ${a.action}">${a.action}</span></td>
+      <td class="mono">${fmtUSD(a.price)}</td>
+      <td>${a.reason || ""}</td>
+    </tr>`).join("") + `</tbody></table>`;
+}
+
 function renderTrades(s) {
   const el = document.getElementById("trades");
   if (!s.trades || !s.trades.length) { el.innerHTML = '<div class="empty">No trades yet. The bot trades when a signal fires.</div>'; return; }
@@ -224,7 +246,7 @@ async function refresh() {
     if (!res.ok) throw new Error("state.json not found");
     const s = await res.json();
     document.getElementById("updated").textContent = "updated " + ago(s.updated_at);
-    renderCards(s); renderChart(s); renderPositions(s); renderSignals(s); renderTrades(s);
+    renderCards(s); renderChart(s); renderPositions(s); renderSignals(s); renderActivity(s); renderTrades(s);
   } catch (e) {
     document.getElementById("updated").textContent = "waiting for bot output (state.json)…";
   }
