@@ -10,8 +10,9 @@ starting_cash: 10000        # virtual USD to start with
 fee_rate: 0.006             # simulated taker fee (0.6%)
 buy_fraction: 0.25          # fallback sizing only (used when ATR is unavailable)
 
-# Cadence.
-poll_interval: 3600         # seconds between decision cycles (match granularity)
+# Cadence. Check every 15 min so stop-losses react fast intraday, while entries
+# are still evaluated on hourly candles (candle_granularity below).
+poll_interval: 900          # seconds between decision cycles
 
 # Market data. 300 candles so the 200-period trend filter has enough history.
 candle_granularity: ONE_HOUR   # ONE_MINUTE / FIVE_MINUTE / FIFTEEN_MINUTE / ONE_HOUR / SIX_HOUR / ONE_DAY

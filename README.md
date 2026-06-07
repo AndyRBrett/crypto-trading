@@ -168,7 +168,8 @@ Setup:
    `ANTHROPIC_API_KEY`. Without it, the cloud bot uses the templated rationale.
    No GitHub token needed — Actions provides one automatically.
 3. **Kick off the first run:** Actions tab → "Run trading bot (always-on)" →
-   *Run workflow*. After that it runs hourly on its own.
+   *Run workflow*. After that it runs every 15 minutes on its own (entries use
+   hourly candles; the frequent checks keep stop-losses responsive).
 
 Notes:
 - Cron timing is approximate (GitHub may delay a run by several minutes).
