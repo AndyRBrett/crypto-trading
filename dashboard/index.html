@@ -59,6 +59,9 @@
   .chip.active { background: var(--accent); border-color: var(--accent); color: #06223f; font-weight: 600; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 8px; }
   .legend span::before { content: "—"; font-weight: 700; margin-right: 4px; }
+  .chart-head { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 8px; min-height: 24px; flex-wrap: wrap; }
+  .chart-head .price { font-size: 20px; font-weight: 700; }
+  .chart-head .chg { font-size: 13px; font-weight: 600; }
   @media (max-width: 640px) {
     body { font-size: 13px; }
     header { padding: 14px 16px; padding-top: max(14px, env(safe-area-inset-top)); }
@@ -83,6 +86,7 @@
 
   <section>
     <h2 id="chartTitle">Equity curve</h2>
+    <div class="chart-head" id="chartHead"></div>
     <canvas id="chart" width="1040" height="220"></canvas>
     <div class="legend" id="legend"></div>
   </section>
@@ -237,7 +241,7 @@ function renderEquityChart(s) {
     return;
   }
 
-  const padL = 66, padR = 14, padT = 36, padB = 26;
+  const padL = 66, padR = 14, padT = 18, padB = 26;
   const base = s.starting_cash;
   let min = Math.min(...curve), max = Math.max(...curve);
   if (base >= min && base <= max) { /* keep */ } else { min = Math.min(min, base); max = Math.max(max, base); }
@@ -292,13 +296,11 @@ function renderEquityChart(s) {
   if (pts[0] && pts[0].timestamp) { ctx.textAlign = "left"; ctx.fillText(ago(pts[0].timestamp), padL, h - 8); }
   ctx.textAlign = "right"; ctx.fillText("now", w - padR, h - 8);
 
-  // Current value + % change (top-left).
+  // Current value + % change go in the HTML header (no canvas overlap).
   const pct = base ? (last / base - 1) * 100 : 0;
-  ctx.textAlign = "left"; ctx.textBaseline = "top";
-  ctx.fillStyle = "#e6e9ee"; ctx.font = "600 17px system-ui, sans-serif";
-  ctx.fillText(fmtUSD(last), padL, 8);
-  ctx.fillStyle = color; ctx.font = "12px system-ui, sans-serif";
-  ctx.fillText((pct >= 0 ? "▲ +" : "▼ ") + pct.toFixed(2) + "%", padL + ctx.measureText(fmtUSD(last)).width + 12, 12);
+  document.getElementById("chartHead").innerHTML =
+    `<span class="price">${fmtUSD(last)}</span>` +
+    `<span class="chg" style="color:${color}">${(pct >= 0 ? "▲ +" : "▼ ") + pct.toFixed(2) + "%"}</span>`;
 }
 
 let selectedCoin = "ALL";
@@ -331,6 +333,7 @@ function emaSeries(vals, period) {
 
 function renderMainChart(s) {
   const title = document.getElementById("chartTitle");
+  document.getElementById("chartHead").innerHTML = "";
   if (selectedCoin === "ALL") { title.textContent = "Equity curve"; renderEquityChart(s); }
   else { title.textContent = selectedCoin + " · 1h candles"; renderPriceChart(s, selectedCoin); }
 }
@@ -361,7 +364,7 @@ function renderPriceChart(s, coin) {
   const fast = emaSeries(closes, fastP), slow = emaSeries(closes, slowP);
   const trend = ind.trend_ma;
 
-  const padL = 66, padR = 14, padT = 36, padB = 26;
+  const padL = 66, padR = 14, padT = 18, padB = 26;
   const n = hist.length;
   const min = Math.min(...lows), max = Math.max(...highs);
   const span = (max - min) || (max * 0.01) || 1;
@@ -412,13 +415,12 @@ function renderPriceChart(s, coin) {
   if (hist[0] && hist[0].t) { ctx.textAlign = "left"; ctx.fillText(ago(hist[0].t), padL, h - 8); }
   ctx.textAlign = "right"; ctx.fillText("now", w - padR, h - 8);
 
-  // Current price + % change across the window.
+  // Current price + % change go in the HTML header (no canvas overlap).
   const last = closes[n - 1], first = closes[0], pct = first ? (last / first - 1) * 100 : 0;
-  const upAll = last >= first, col = upAll ? "#2ecc71" : "#e74c3c";
-  ctx.textAlign = "left"; ctx.textBaseline = "top";
-  ctx.fillStyle = "#e6e9ee"; ctx.font = "600 17px system-ui, sans-serif"; ctx.fillText(fmtUSD(last), padL, 8);
-  ctx.fillStyle = col; ctx.font = "12px system-ui, sans-serif";
-  ctx.fillText((pct >= 0 ? "▲ +" : "▼ ") + pct.toFixed(2) + "% (window)", padL + ctx.measureText(fmtUSD(last)).width + 12, 12);
+  const col = last >= first ? "#2ecc71" : "#e74c3c";
+  document.getElementById("chartHead").innerHTML =
+    `<span class="price">${fmtUSD(last)}</span>` +
+    `<span class="chg" style="color:${col}">${(pct >= 0 ? "▲ +" : "▼ ") + pct.toFixed(2) + "% (window)"}</span>`;
 
   // Legend.
   let lg = `<span style="color:#2ecc71">up</span><span style="color:#e74c3c">down</span>`;
