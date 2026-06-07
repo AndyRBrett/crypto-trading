@@ -46,7 +46,8 @@ class Config:
     # Market data. 300 candles so the 200-period trend filter has history.
     candle_granularity: str = "ONE_HOUR"  # ONE_HOUR / ONE_DAY / etc.
     candle_count: int = 300
-    data_source: str = "public"  # "public" or "coinbase_advanced"
+    data_source: str = "public"  # kept for backward compat; CCXT is now used for all sources
+    exchange: str = "coinbase"   # any CCXT exchange id (coinbase, kraken, binance, ...)
 
     # Strategy.
     strategy: StrategyConfig = field(default_factory=StrategyConfig)

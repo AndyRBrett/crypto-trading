@@ -17,7 +17,8 @@ poll_interval: 900          # seconds between decision cycles
 # Market data. 300 candles so the 200-period trend filter has enough history.
 candle_granularity: ONE_HOUR   # ONE_MINUTE / FIVE_MINUTE / FIFTEEN_MINUTE / ONE_HOUR / SIX_HOUR / ONE_DAY
 candle_count: 300
-data_source: public            # "public" (no keys) or "coinbase_advanced" (uses your keys)
+exchange: coinbase             # any CCXT exchange id: coinbase, kraken, binance, bybit, ...
+data_source: public            # kept for backward compat; "public" (no keys) or "coinbase_advanced" (uses your keys)
 
 # Strategy: trend-following EMA crossover, filtered by a long-term trend MA,
 # an ADX chop filter, RSI, and (optionally) news sentiment.
