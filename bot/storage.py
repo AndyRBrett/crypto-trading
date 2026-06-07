@@ -165,6 +165,7 @@ class Storage:
         portfolio: Portfolio,
         prices: dict[str, float],
         latest_signals: dict,
+        price_history: dict | None = None,
     ) -> None:
         positions = []
         for pid, pos in portfolio.positions.items():
@@ -201,6 +202,7 @@ class Storage:
             "prices": prices,
             "positions": positions,
             "latest_signals": latest_signals,
+            "price_history": price_history or {},
             "activity": self.load_activity(),
             "equity_curve": self.load_equity_curve(),
             "trades": [
