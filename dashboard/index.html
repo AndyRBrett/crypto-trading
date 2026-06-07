@@ -54,6 +54,11 @@
   .mono { font-variant-numeric: tabular-nums; }
   .table-wrap, #positions, #signals, #activity { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .hint { color: var(--muted); font-size: 12px; margin: -4px 0 10px; }
+  .filter { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+  .chip { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: #06223f; font-weight: 600; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 8px; }
+  .legend span::before { content: "—"; font-weight: 700; margin-right: 4px; }
   @media (max-width: 640px) {
     body { font-size: 13px; }
     header { padding: 14px 16px; padding-top: max(14px, env(safe-area-inset-top)); }
@@ -74,9 +79,12 @@
 <main>
   <div class="cards" id="cards"></div>
 
+  <div class="filter" id="filter"></div>
+
   <section>
-    <h2>Equity curve</h2>
+    <h2 id="chartTitle">Equity curve</h2>
     <canvas id="chart" width="1040" height="220"></canvas>
+    <div class="legend" id="legend"></div>
   </section>
 
   <section>
@@ -145,7 +153,7 @@ function renderPositions(s) {
 
 function renderSignals(s) {
   const el = document.getElementById("signals");
-  const entries = Object.entries(s.latest_signals || {});
+  const entries = Object.entries(s.latest_signals || {}).filter(([pid]) => coinMatch(pid));
   if (!entries.length) { el.innerHTML = '<div class="empty">No signals yet.</div>'; return; }
   el.innerHTML = `<table><thead><tr>
       <th>Market</th><th>Signal</th><th>Price</th><th>Fast MA</th><th>Slow MA</th><th>Trend MA</th><th>RSI</th><th>ADX</th><th>Sentiment</th><th>Why</th>
@@ -171,7 +179,7 @@ function renderSignals(s) {
 
 function renderActivity(s) {
   const el = document.getElementById("activity");
-  const items = s.activity || [];
+  const items = (s.activity || []).filter(a => coinMatch(a.product_id));
   if (!items.length) { el.innerHTML = '<div class="empty">No activity recorded yet.</div>'; return; }
   el.innerHTML = `<table><thead><tr>
       <th>When</th><th>Market</th><th>Decision</th><th>Price</th><th>Why</th>
@@ -186,8 +194,9 @@ function renderActivity(s) {
 
 function renderTrades(s) {
   const el = document.getElementById("trades");
-  if (!s.trades || !s.trades.length) { el.innerHTML = '<div class="empty">No trades yet. The bot trades when a signal fires.</div>'; return; }
-  el.innerHTML = s.trades.map(t => {
+  const trades = (s.trades || []).filter(t => coinMatch(t.product_id));
+  if (!trades.length) { el.innerHTML = '<div class="empty">No trades yet. The bot trades when a signal fires.</div>'; return; }
+  el.innerHTML = trades.map(t => {
     const ind = t.indicators || {};
     const pnl = t.side === "SELL" ? ` · realized ${fmtUSD(t.realized_pnl)}` : "";
     return `<div class="trade">
@@ -206,7 +215,8 @@ function renderTrades(s) {
   }).join("");
 }
 
-function renderChart(s) {
+function renderEquityChart(s) {
+  document.getElementById("legend").innerHTML = "";
   const c = document.getElementById("chart");
   // Crisp + responsive: size the backing store to the displayed box.
   const dpr = window.devicePixelRatio || 1;
@@ -291,13 +301,132 @@ function renderChart(s) {
   ctx.fillText((pct >= 0 ? "▲ +" : "▼ ") + pct.toFixed(2) + "%", padL + ctx.measureText(fmtUSD(last)).width + 12, 12);
 }
 
+let selectedCoin = "ALL";
+let lastState = null;
+const coinMatch = (pid) => selectedCoin === "ALL" || pid === selectedCoin;
+
+function renderFilter(s) {
+  const el = document.getElementById("filter");
+  if (!(s.products && s.products.length)) { el.innerHTML = ""; return; }
+  const coins = ["ALL"].concat(s.products);
+  el.innerHTML = coins.map(c =>
+    `<button class="chip ${c === selectedCoin ? "active" : ""}" data-coin="${c}">${c === "ALL" ? "All" : c}</button>`
+  ).join("");
+  el.querySelectorAll("button").forEach(b => {
+    b.onclick = () => { selectedCoin = b.dataset.coin; if (lastState) renderAll(lastState); };
+  });
+}
+
+// Exponential moving average aligned to the input (leading nulls until seeded).
+function emaSeries(vals, period) {
+  if (!period || vals.length < period) return [];
+  const k = 2 / (period + 1);
+  const out = new Array(vals.length).fill(null);
+  let prev = 0;
+  for (let i = 0; i < period; i++) prev += vals[i];
+  prev /= period; out[period - 1] = prev;
+  for (let i = period; i < vals.length; i++) { prev = vals[i] * k + prev * (1 - k); out[i] = prev; }
+  return out;
+}
+
+function renderMainChart(s) {
+  const title = document.getElementById("chartTitle");
+  if (selectedCoin === "ALL") { title.textContent = "Equity curve"; renderEquityChart(s); }
+  else { title.textContent = selectedCoin + " — price & trend"; renderPriceChart(s, selectedCoin); }
+}
+
+function renderPriceChart(s, coin) {
+  const c = document.getElementById("chart");
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth || 1040, h = c.clientHeight || 220;
+  c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+  const ctx = c.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, h);
+  const legend = document.getElementById("legend");
+
+  const hist = (s.price_history || {})[coin] || [];
+  const closes = hist.map(p => p.c);
+  if (closes.length < 2) {
+    legend.innerHTML = "";
+    ctx.fillStyle = "#8a93a2"; ctx.font = "14px system-ui, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText("No price history yet for " + coin + " — appears after a tick or two.", 16, h / 2);
+    return;
+  }
+  const ind = ((s.latest_signals || {})[coin] || {}).indicators || {};
+  const fastP = ind.fast_period, slowP = ind.slow_period;
+  const fast = emaSeries(closes, fastP), slow = emaSeries(closes, slowP);
+  const trend = ind.trend_ma;
+
+  const padL = 66, padR = 14, padT = 36, padB = 26;
+  const min = Math.min(...closes), max = Math.max(...closes);
+  const span = (max - min) || (max * 0.01) || 1;
+  const lo = min - span * 0.10, hi = max + span * 0.10, range = hi - lo;
+  const x = (i) => padL + (i / (closes.length - 1)) * (w - padL - padR);
+  const y = (v) => padT + (1 - (v - lo) / range) * (h - padT - padB);
+
+  // Gridlines + $ labels.
+  ctx.font = "11px system-ui, sans-serif"; ctx.textBaseline = "middle";
+  for (let i = 0; i <= 4; i++) {
+    const val = lo + range * i / 4, yy = y(val);
+    ctx.strokeStyle = "#222a35"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(w - padR, yy); ctx.stroke();
+    ctx.fillStyle = "#8a93a2"; ctx.textAlign = "right"; ctx.fillText(fmtUSD(val), padL - 8, yy);
+  }
+
+  // Trend level (where the 200-MA currently sits).
+  if (trend != null && trend >= lo && trend <= hi) {
+    ctx.strokeStyle = "#9aa4b2"; ctx.setLineDash([5, 4]); ctx.lineWidth = 1; ctx.beginPath();
+    ctx.moveTo(padL, y(trend)); ctx.lineTo(w - padR, y(trend)); ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  const drawLine = (series, color, width) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineJoin = "round"; ctx.beginPath();
+    let started = false;
+    series.forEach((v, i) => { if (v == null) return; if (!started) { ctx.moveTo(x(i), y(v)); started = true; } else ctx.lineTo(x(i), y(v)); });
+    ctx.stroke();
+  };
+  drawLine(closes, "#cfd6e0", 2);
+  if (fast.length) drawLine(fast, "#4aa3ff", 1.5);
+  if (slow.length) drawLine(slow, "#f0a35e", 1.5);
+
+  const last = closes[closes.length - 1];
+  ctx.fillStyle = "#cfd6e0"; ctx.beginPath(); ctx.arc(x(closes.length - 1), y(last), 3.5, 0, Math.PI * 2); ctx.fill();
+
+  // Time markers.
+  ctx.fillStyle = "#8a93a2"; ctx.font = "11px system-ui, sans-serif"; ctx.textBaseline = "alphabetic";
+  if (hist[0] && hist[0].t) { ctx.textAlign = "left"; ctx.fillText(ago(hist[0].t), padL, h - 8); }
+  ctx.textAlign = "right"; ctx.fillText("now", w - padR, h - 8);
+
+  // Current price + % change across the window.
+  const first = closes[0], pct = first ? (last / first - 1) * 100 : 0;
+  const up = last >= first, col = up ? "#2ecc71" : "#e74c3c";
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillStyle = "#e6e9ee"; ctx.font = "600 17px system-ui, sans-serif"; ctx.fillText(fmtUSD(last), padL, 8);
+  ctx.fillStyle = col; ctx.font = "12px system-ui, sans-serif";
+  ctx.fillText((pct >= 0 ? "▲ +" : "▼ ") + pct.toFixed(2) + "% (window)", padL + ctx.measureText(fmtUSD(last)).width + 12, 12);
+
+  // Legend.
+  let lg = `<span style="color:#cfd6e0">price</span>`;
+  if (fast.length) lg += `<span style="color:#4aa3ff">EMA ${fastP}</span>`;
+  if (slow.length) lg += `<span style="color:#f0a35e">EMA ${slowP}</span>`;
+  if (trend != null) lg += `<span style="color:#9aa4b2">trend ${fmtUSD(trend)}</span>`;
+  const extra = [];
+  if (ind.rsi != null) extra.push("RSI " + ind.rsi);
+  if (ind.adx != null) extra.push("ADX " + ind.adx);
+  if (extra.length) lg += `<em style="font-style:normal">${extra.join(" · ")}</em>`;
+  legend.innerHTML = lg;
+}
+
+function renderAll(s) {
+  document.getElementById("updated").textContent = "updated " + ago(s.updated_at);
+  renderCards(s); renderFilter(s); renderMainChart(s);
+  renderPositions(s); renderSignals(s); renderActivity(s); renderTrades(s);
+}
+
 async function refresh() {
   try {
     const res = await fetch("state.json?t=" + Date.now());
     if (!res.ok) throw new Error("state.json not found");
-    const s = await res.json();
-    document.getElementById("updated").textContent = "updated " + ago(s.updated_at);
-    renderCards(s); renderChart(s); renderPositions(s); renderSignals(s); renderActivity(s); renderTrades(s);
+    lastState = await res.json();
+    renderAll(lastState);
   } catch (e) {
     document.getElementById("updated").textContent = "waiting for bot output (state.json)…";
   }

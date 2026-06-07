@@ -76,6 +76,7 @@ class Engine:
 
         executed = []
         prices: dict[str, float] = {}
+        price_history: dict[str, list] = {}
 
         for product_id in self.config.products:
             try:
@@ -86,6 +87,12 @@ class Engine:
             if not candles:
                 log.warning("No candles for %s", product_id)
                 continue
+
+            # Recent closes for the dashboard's per-coin price chart.
+            price_history[product_id] = [
+                {"t": int(c["time"]), "c": round(float(c["close"]), 2)}
+                for c in candles[-120:]
+            ]
 
             sentiment = None
             if self.analyzer is not None:
@@ -140,6 +147,7 @@ class Engine:
                 self.portfolio,
                 prices,
                 self.latest_signals,
+                price_history,
             )
             if self.publisher.enabled:
                 self.publisher.publish(self.config.dashboard_state_path)
