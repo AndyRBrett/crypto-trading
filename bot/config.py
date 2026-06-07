@@ -40,16 +40,25 @@ class Config:
     products: list[str] = field(default_factory=lambda: ["BTC-USD"])
     starting_cash: float = 10_000.0
     fee_rate: float = 0.006  # 0.6% taker fee, Coinbase-ish
-    buy_fraction: float = 0.25  # fraction of cash to deploy per BUY
+    buy_fraction: float = 0.25  # fallback sizing when ATR is unavailable
     poll_interval: int = 3600  # seconds between ticks (matches 1h candles)
 
-    # Market data.
+    # Market data. 300 candles so the 200-period trend filter has history.
     candle_granularity: str = "ONE_HOUR"  # ONE_HOUR / ONE_DAY / etc.
-    candle_count: int = 100
+    candle_count: int = 300
     data_source: str = "public"  # "public" or "coinbase_advanced"
 
     # Strategy.
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
+
+    # Risk management (engine-level sizing + protective exits).
+    risk_per_trade_pct: float = 0.01  # risk ~1% of equity per trade on the stop
+    max_position_pct: float = 0.30  # cap any single position at 30% of equity
+    max_open_positions: int = 3  # portfolio heat cap
+    stop_loss_atr_mult: float = 2.0  # initial stop = entry - mult * ATR
+    take_profit_atr_mult: float = 4.0  # target = entry + mult * ATR (2:1 reward:risk)
+    trailing_stop: bool = True  # ride winners with a Chandelier trailing stop
+    fallback_stop_pct: float = 0.08  # stop distance when ATR isn't available
 
     # Claude trade explanations.
     explanations_enabled: bool = True

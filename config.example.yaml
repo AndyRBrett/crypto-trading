@@ -8,25 +8,43 @@ products:
 # Paper account.
 starting_cash: 10000        # virtual USD to start with
 fee_rate: 0.006             # simulated taker fee (0.6%)
-buy_fraction: 0.25          # fraction of available cash to deploy per BUY
+buy_fraction: 0.25          # fallback sizing only (used when ATR is unavailable)
 
-# Cadence.
-poll_interval: 3600         # seconds between decision cycles (match granularity)
+# Cadence. Check every 15 min so stop-losses react fast intraday, while entries
+# are still evaluated on hourly candles (candle_granularity below).
+poll_interval: 900          # seconds between decision cycles
 
-# Market data.
+# Market data. 300 candles so the 200-period trend filter has enough history.
 candle_granularity: ONE_HOUR   # ONE_MINUTE / FIVE_MINUTE / FIFTEEN_MINUTE / ONE_HOUR / SIX_HOUR / ONE_DAY
-candle_count: 100
+candle_count: 300
 data_source: public            # "public" (no keys) or "coinbase_advanced" (uses your keys)
 
-# Strategy: SMA crossover gated by RSI (and, optionally, news sentiment).
+# Strategy: trend-following EMA crossover, filtered by a long-term trend MA,
+# an ADX chop filter, RSI, and (optionally) news sentiment.
 strategy:
-  fast_period: 12
-  slow_period: 26
+  fast_period: 20
+  slow_period: 50
+  ma_type: ema                  # "ema" or "sma"
   rsi_period: 14
   rsi_overbought: 70
   rsi_oversold: 30
+  trend_filter: true            # only go long while price is above the trend MA
+  trend_period: 200
+  adx_filter: true              # only trade when a real trend is present
+  adx_period: 14
+  adx_min: 20                   # minimum ADX (trend strength) to trade
+  atr_period: 14                # volatility, used for sizing + stops
   sentiment_buy_veto: -0.4      # block BUYs when news sentiment <= this
   sentiment_sell_trigger: -0.6  # risk-off SELL when news sentiment <= this
+
+# Risk management: volatility-based sizing and protective exits.
+risk_per_trade_pct: 0.01     # risk ~1% of equity per trade (sized off the stop)
+max_position_pct: 0.30       # cap any single position at 30% of equity
+max_open_positions: 3        # max concurrent positions (portfolio heat)
+stop_loss_atr_mult: 2.0      # initial stop = entry - 2 * ATR
+take_profit_atr_mult: 4.0    # target = entry + 4 * ATR (2:1 reward:risk)
+trailing_stop: true          # ride winners with a Chandelier trailing stop
+fallback_stop_pct: 0.08      # stop distance when ATR isn't available
 
 # Claude trade explanations.
 explanations_enabled: true
@@ -34,8 +52,8 @@ explain_model: claude-opus-4-8   # falls back to a templated rationale if no API
 
 # News sentiment: Claude scores recent headlines and folds the result into
 # signals (confirms/vetoes price-based decisions; never invents a BUY on its
-# own). Needs ANTHROPIC_API_KEY + network. Off by default.
-sentiment_enabled: false
+# own). Needs ANTHROPIC_API_KEY + network. Safe no-op without the key.
+sentiment_enabled: true
 sentiment_model: claude-opus-4-8
 sentiment_cache_ttl: 1800        # seconds to reuse a score before refetching
 sentiment_max_headlines: 15

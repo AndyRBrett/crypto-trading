@@ -66,3 +66,89 @@ def rsi(values: Sequence[float], period: int = 14) -> float | None:
         return 100.0
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1 + rs))
+
+
+def true_ranges(
+    highs: Sequence[float], lows: Sequence[float], closes: Sequence[float]
+) -> list[float]:
+    """Per-bar true range: max(high-low, |high-prevClose|, |low-prevClose|)."""
+    trs: list[float] = []
+    for i in range(1, len(closes)):
+        h, l, prev_close = highs[i], lows[i], closes[i - 1]
+        trs.append(max(h - l, abs(h - prev_close), abs(l - prev_close)))
+    return trs
+
+
+def atr(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    period: int = 14,
+) -> float | None:
+    """Average True Range (Wilder smoothing). A volatility measure in price units.
+
+    Used for stop distances and position sizing. Returns None without enough data.
+    """
+    if period <= 0 or len(closes) < period + 1:
+        return None
+    trs = true_ranges(highs, lows, closes)
+    current = sum(trs[:period]) / period
+    for tr in trs[period:]:
+        current = (current * (period - 1) + tr) / period
+    return current
+
+
+def adx(
+    highs: Sequence[float],
+    lows: Sequence[float],
+    closes: Sequence[float],
+    period: int = 14,
+) -> float | None:
+    """Average Directional Index (Wilder). Measures *trend strength* in [0, 100].
+
+    Low ADX (< ~20) means range-bound/choppy; high ADX means a strong trend.
+    Returns None without enough data (needs ~2*period bars).
+    """
+    n = len(closes)
+    if period <= 0 or n < 2 * period + 1:
+        return None
+
+    plus_dm: list[float] = []
+    minus_dm: list[float] = []
+    trs: list[float] = []
+    for i in range(1, n):
+        up_move = highs[i] - highs[i - 1]
+        down_move = lows[i - 1] - lows[i]
+        plus_dm.append(up_move if (up_move > down_move and up_move > 0) else 0.0)
+        minus_dm.append(down_move if (down_move > up_move and down_move > 0) else 0.0)
+        h, l, prev_close = highs[i], lows[i], closes[i - 1]
+        trs.append(max(h - l, abs(h - prev_close), abs(l - prev_close)))
+
+    def _wilder(values: list[float]) -> list[float]:
+        running = sum(values[:period])
+        out = [running]
+        for v in values[period:]:
+            running = running - running / period + v
+            out.append(running)
+        return out
+
+    tr_s = _wilder(trs)
+    pdm_s = _wilder(plus_dm)
+    mdm_s = _wilder(minus_dm)
+
+    dxs: list[float] = []
+    for tr_v, pdm_v, mdm_v in zip(tr_s, pdm_s, mdm_s):
+        if tr_v == 0:
+            dxs.append(0.0)
+            continue
+        plus_di = 100 * pdm_v / tr_v
+        minus_di = 100 * mdm_v / tr_v
+        denom = plus_di + minus_di
+        dxs.append(100 * abs(plus_di - minus_di) / denom if denom else 0.0)
+
+    if len(dxs) < period:
+        return None
+    current = sum(dxs[:period]) / period
+    for dx in dxs[period:]:
+        current = (current * (period - 1) + dx) / period
+    return current

@@ -78,6 +78,26 @@ class Portfolio:
     def realized_pnl(self) -> float:
         return sum(t.realized_pnl for t in self.trades)
 
+    def opened_at(self, product_id: str) -> float | None:
+        """Timestamp the current open position was first opened (0 -> long).
+
+        Used by the trailing stop to find the highest high *since entry*.
+        Returns None if the position is currently flat.
+        """
+        qty = 0.0
+        opened: float | None = None
+        for t in sorted(self.trades, key=lambda x: x.timestamp):
+            if t.product_id != product_id:
+                continue
+            was_flat = qty <= 1e-9
+            qty += t.quantity if t.side == BUY else -t.quantity
+            if was_flat and qty > 1e-9:
+                opened = t.timestamp
+            if qty <= 1e-9:
+                qty = 0.0
+                opened = None
+        return opened
+
     # -- mutations ---------------------------------------------------------
 
     def execute(

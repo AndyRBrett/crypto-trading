@@ -9,9 +9,11 @@ name: Run trading bot (always-on)
 
 on:
   schedule:
-    # Hourly, at :17 past (off the top of the hour, where GitHub cron is busiest
-    # and more likely to be delayed). Timing is approximate by design.
-    - cron: "17 * * * *"
+    # Every 15 minutes. Entries are still based on hourly candles; the extra
+    # checks let stop-losses / trailing stops react within the hour rather than
+    # only on the hour. GitHub cron timing is approximate (runs can be delayed
+    # a few minutes), which is fine for this.
+    - cron: "*/15 * * * *"
   workflow_dispatch: {} # lets you trigger a run by hand from the Actions tab
 
 # Allow the built-in token to push to gh-pages and the bot-state branch.

@@ -9,6 +9,38 @@ products:
   - BTC-USD
   - ETH-USD
 
+# 300 candles so the 200-period trend filter has enough history.
+candle_count: 300
+
+# Trend-following EMA crossover, filtered by trend + ADX + RSI + sentiment.
+strategy:
+  fast_period: 20
+  slow_period: 50
+  ma_type: ema
+  rsi_period: 14
+  rsi_overbought: 70
+  rsi_oversold: 30
+  trend_filter: true
+  trend_period: 200
+  adx_filter: true
+  adx_period: 14
+  adx_min: 20
+  atr_period: 14
+  sentiment_buy_veto: -0.4
+  sentiment_sell_trigger: -0.6
+
+# Risk management: volatility-based sizing and protective exits.
+risk_per_trade_pct: 0.01
+max_position_pct: 0.30
+max_open_positions: 3
+stop_loss_atr_mult: 2.0
+take_profit_atr_mult: 4.0
+trailing_stop: true
+fallback_stop_pct: 0.08
+
+# News sentiment (needs the ANTHROPIC_API_KEY Actions secret; safe no-op without).
+sentiment_enabled: true
+
 # Publish state.json to the gh-pages branch so the dashboard updates.
 publish_enabled: true
 publish_repo: AndyRBrett/crypto-trading

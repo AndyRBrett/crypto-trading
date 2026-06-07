@@ -1,16 +1,23 @@
 """Signal generation.
 
-The default strategy is an SMA crossover gated by an RSI filter:
+A trend-following strategy built the way a discretionary-systematic trader
+would gate entries — multiple confirmations, trade *with* the higher-timeframe
+trend, and stay out of chop:
 
-  * BUY  when the fast SMA crosses *above* the slow SMA (bullish crossover)
-         and RSI is not already overbought.
-  * SELL when the fast SMA crosses *below* the slow SMA (bearish crossover),
-         or RSI is overbought (take profit).
+  * BUY  when the fast MA crosses *above* the slow MA (momentum turning up),
+         AND price is above the long-term trend MA (trade with the trend),
+         AND ADX shows a real trend (not chop),
+         AND RSI is not already overbought.
+  * SELL when the fast MA crosses *below* the slow MA, or RSI is overbought.
+         (Hard stops, take-profits and the trailing stop live in the engine,
+         since they react to price between signals, not just on a crossover.)
   * HOLD otherwise.
 
-Every signal carries the indicator snapshot and a list of plain-English
-reasons. Those reasons are what the dashboard shows and what Claude turns
-into a human explanation, so the trading logic stays fully auditable.
+News sentiment, when supplied, can veto a BUY or force a risk-off SELL — it
+never invents a BUY on its own.
+
+Every signal carries the indicator snapshot (including ATR, used by the engine
+for sizing and stops) and plain-English reasons, so the logic stays auditable.
 """
 
 from __future__ import annotations
@@ -37,11 +44,23 @@ class Signal:
 
 @dataclass
 class StrategyConfig:
-    fast_period: int = 12
-    slow_period: int = 26
+    # Moving-average crossover.
+    fast_period: int = 20
+    slow_period: int = 50
+    ma_type: str = "ema"  # "ema" (default) or "sma"
+    # Momentum oscillator.
     rsi_period: int = 14
     rsi_overbought: float = 70.0
     rsi_oversold: float = 30.0
+    # Trend filter: only go long while price is above this long-term MA.
+    trend_filter: bool = True
+    trend_period: int = 200
+    # Chop filter: only trade when ADX shows a trend of at least this strength.
+    adx_filter: bool = True
+    adx_period: int = 14
+    adx_min: float = 20.0
+    # Volatility (ATR) — surfaced for the engine's sizing/stops.
+    atr_period: int = 14
     # News-sentiment gating (only applied when a Sentiment is supplied).
     sentiment_buy_veto: float = -0.4  # block BUYs when sentiment <= this
     sentiment_sell_trigger: float = -0.6  # risk-off SELL when sentiment <= this
@@ -51,17 +70,30 @@ class Strategy:
     def __init__(self, config: StrategyConfig | None = None):
         self.config = config or StrategyConfig()
 
+    def _ma(self, values, period):
+        if self.config.ma_type == "sma":
+            return indicators.sma(values, period)
+        return indicators.ema(values, period)
+
     def min_candles(self) -> int:
         """Minimum candles needed to produce a meaningful signal."""
         c = self.config
-        # +1 so we can also compute the *previous* SMAs for crossover detection.
-        return max(c.slow_period, c.rsi_period + 1) + 1
+        base = max(c.slow_period, c.rsi_period + 1)
+        if c.trend_filter:
+            base = max(base, c.trend_period)
+        if c.adx_filter:
+            base = max(base, 2 * c.adx_period + 1)
+        # +1 so we can also compute the *previous* MAs for crossover detection.
+        return base + 1
 
     def generate_signal(
         self, product_id: str, candles: Sequence[dict], sentiment=None
     ) -> Signal:
         c = self.config
         closes = [float(candle["close"]) for candle in candles]
+        # High/low default to close so close-only candles (e.g. tests) still work.
+        highs = [float(candle.get("high", candle["close"])) for candle in candles]
+        lows = [float(candle.get("low", candle["close"])) for candle in candles]
         price = closes[-1] if closes else 0.0
 
         if len(closes) < self.min_candles():
@@ -72,11 +104,14 @@ class Strategy:
                 reasons=[f"Not enough data yet ({len(closes)}/{self.min_candles()} candles)."],
             )
 
-        fast = indicators.sma(closes, c.fast_period)
-        slow = indicators.sma(closes, c.slow_period)
-        prev_fast = indicators.sma(closes[:-1], c.fast_period)
-        prev_slow = indicators.sma(closes[:-1], c.slow_period)
+        fast = self._ma(closes, c.fast_period)
+        slow = self._ma(closes, c.slow_period)
+        prev_fast = self._ma(closes[:-1], c.fast_period)
+        prev_slow = self._ma(closes[:-1], c.slow_period)
         rsi_val = indicators.rsi(closes, c.rsi_period)
+        trend_ma = self._ma(closes, c.trend_period) if c.trend_filter else None
+        atr_val = indicators.atr(highs, lows, closes, c.atr_period)
+        adx_val = indicators.adx(highs, lows, closes, c.adx_period) if c.adx_filter else None
 
         snapshot = {
             "fast_sma": round(fast, 2),
@@ -84,37 +119,59 @@ class Strategy:
             "prev_fast_sma": round(prev_fast, 2),
             "prev_slow_sma": round(prev_slow, 2),
             "rsi": round(rsi_val, 2),
+            "ma_type": c.ma_type,
             "fast_period": c.fast_period,
             "slow_period": c.slow_period,
             "rsi_period": c.rsi_period,
         }
+        if trend_ma is not None:
+            snapshot["trend_ma"] = round(trend_ma, 2)
+        if atr_val is not None:
+            snapshot["atr"] = round(atr_val, 2)
+        if adx_val is not None:
+            snapshot["adx"] = round(adx_val, 2)
 
         bullish_cross = prev_fast <= prev_slow and fast > slow
         bearish_cross = prev_fast >= prev_slow and fast < slow
         gap = abs(fast - slow) / slow if slow else 0.0
+        uptrend = trend_ma is None or price > trend_ma
+        trend_ok = adx_val is None or adx_val >= c.adx_min
 
         reasons: list[str] = []
         action = HOLD
         strength = 0.0
 
-        if bullish_cross and rsi_val < c.rsi_overbought:
+        if bullish_cross and rsi_val < c.rsi_overbought and uptrend and trend_ok:
             action = BUY
             reasons.append(
-                f"Fast SMA({c.fast_period}) crossed above slow SMA({c.slow_period}) "
-                f"({fast:.2f} > {slow:.2f}) — bullish momentum."
+                f"Fast {c.ma_type.upper()}({c.fast_period}) crossed above slow "
+                f"{c.ma_type.upper()}({c.slow_period}) ({fast:.2f} > {slow:.2f}) — bullish momentum."
             )
+            if trend_ma is not None:
+                reasons.append(f"Price ${price:,.2f} above trend MA({c.trend_period}) ${trend_ma:,.2f} — with the trend.")
+            if adx_val is not None:
+                reasons.append(f"ADX {adx_val:.1f} ≥ {c.adx_min:.0f} — trend has strength.")
             reasons.append(f"RSI {rsi_val:.1f} below overbought ({c.rsi_overbought:.0f}) — room to run.")
             strength = min(1.0, 0.5 + gap * 10)
+        elif bullish_cross and not uptrend:
+            reasons.append(
+                f"Bullish crossover, but price ${price:,.2f} is below trend MA({c.trend_period}) "
+                f"${trend_ma:,.2f} — counter-trend, skipping the buy."
+            )
+        elif bullish_cross and not trend_ok:
+            reasons.append(
+                f"Bullish crossover, but ADX {adx_val:.1f} < {c.adx_min:.0f} — market is choppy, skipping."
+            )
         elif bullish_cross and rsi_val >= c.rsi_overbought:
             reasons.append(
-                f"Bullish SMA crossover, but RSI {rsi_val:.1f} is overbought "
+                f"Bullish crossover, but RSI {rsi_val:.1f} is overbought "
                 f"(>= {c.rsi_overbought:.0f}) — skipping the buy."
             )
         elif bearish_cross:
             action = SELL
             reasons.append(
-                f"Fast SMA({c.fast_period}) crossed below slow SMA({c.slow_period}) "
-                f"({fast:.2f} < {slow:.2f}) — bearish momentum."
+                f"Fast {c.ma_type.upper()}({c.fast_period}) crossed below slow "
+                f"{c.ma_type.upper()}({c.slow_period}) ({fast:.2f} < {slow:.2f}) — bearish momentum."
             )
             strength = min(1.0, 0.5 + gap * 10)
         elif rsi_val >= c.rsi_overbought:
@@ -124,9 +181,9 @@ class Strategy:
             )
             strength = min(1.0, (rsi_val - c.rsi_overbought) / (100 - c.rsi_overbought))
         else:
-            trend = "above" if fast > slow else "below"
+            trend_word = "above" if fast > slow else "below"
             reasons.append(
-                f"No crossover. Fast SMA {trend} slow SMA; RSI {rsi_val:.1f} is neutral."
+                f"No crossover. Fast MA {trend_word} slow MA; RSI {rsi_val:.1f} is neutral."
             )
 
         # Fold in news sentiment, if available. Sentiment confirms or vetoes the
