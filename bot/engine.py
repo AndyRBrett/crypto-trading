@@ -15,6 +15,7 @@ import logging
 import time
 
 from .config import Config
+from .coordinate import Coordinator
 from .explain import Explainer
 from .market_data import MarketData
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
@@ -35,9 +36,15 @@ class Engine:
         explainer: Explainer | None = None,
         sentiment_analyzer: SentimentAnalyzer | None = None,
         publisher: Publisher | None = None,
+        coordinator: Coordinator | None = None,
     ):
         self.config = config
         self.market_data = market_data or MarketData(config)
+        self.coordinator = coordinator or Coordinator(config)
+        # Pull the shared portfolio before opening the local DB (only when we
+        # create the storage ourselves; injected storage in tests is left alone).
+        if storage is None and self.coordinator.enabled:
+            self.coordinator.pull_db(config.db_path)
         self.storage = storage or Storage(config.db_path)
         self.strategy = Strategy(config.strategy)
         self.explainer = explainer or Explainer(config)
@@ -59,6 +66,14 @@ class Engine:
 
     def tick(self) -> list:
         """Run one decision cycle across all products. Returns executed trades."""
+        # Driver coordination: the cloud stands down while the laptop is active;
+        # whoever runs refreshes the lease so the other side can see it.
+        if self.coordinator.enabled:
+            if self.config.driver_role == "cloud" and self.coordinator.laptop_active():
+                log.info("Laptop driver is active; cloud standing down this run.")
+                return []
+            self.coordinator.claim_lease()
+
         executed = []
         prices: dict[str, float] = {}
 
@@ -128,6 +143,8 @@ class Engine:
             )
             if self.publisher.enabled:
                 self.publisher.publish(self.config.dashboard_state_path)
+            if self.coordinator.enabled:
+                self.coordinator.push_db(self.config.db_path)
         return executed
 
     def _manage(self, signal, price: float, candles: list, prices: dict):

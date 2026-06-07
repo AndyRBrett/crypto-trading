@@ -81,6 +81,15 @@ class Config:
     publish_branch: str = "gh-pages"
     publish_path: str = "state.json"
 
+    # Driver coordination: let a running laptop take priority over the cloud and
+    # share one continuous portfolio between them (see bot/coordinate.py).
+    coordinate_enabled: bool = False
+    driver_role: str = "local"  # "local" (laptop) or "cloud" (Actions)
+    lease_ttl_seconds: int = 1800  # cloud stands down while a local lease is this fresh
+    state_branch: str = "bot-state"  # shared branch holding trading.db + driver.json
+    state_db_path: str = "trading.db"  # path of the shared DB on state_branch
+    lease_path: str = "driver.json"  # path of the lease on state_branch
+
     # Secrets (populated from env, never written to disk by us).
     coinbase_api_key: str = ""
     coinbase_api_secret: str = ""

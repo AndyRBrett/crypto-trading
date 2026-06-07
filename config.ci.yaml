@@ -46,3 +46,9 @@ publish_enabled: true
 publish_repo: AndyRBrett/crypto-trading
 publish_branch: gh-pages
 publish_path: state.json
+
+# Driver coordination: stand down while the laptop is actively driving, and
+# share one continuous portfolio (trading.db on the bot-state branch).
+coordinate_enabled: true
+driver_role: cloud
+lease_ttl_seconds: 1800
