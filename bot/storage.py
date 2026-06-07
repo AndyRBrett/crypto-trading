@@ -51,6 +51,14 @@ class Storage:
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS signal_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                product_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                price REAL NOT NULL,
+                reason TEXT NOT NULL
+            );
             """
         )
         self.conn.commit()
@@ -68,6 +76,24 @@ class Storage:
             (key, value),
         )
         self.conn.commit()
+
+    # -- activity log (every tick's decision, including HOLDs) --------------
+
+    def save_signal(self, timestamp: float, product_id: str, action: str, price: float, reason: str) -> None:
+        self.conn.execute(
+            "INSERT INTO signal_log(timestamp, product_id, action, price, reason) "
+            "VALUES(?, ?, ?, ?, ?)",
+            (timestamp, product_id, action, price, reason),
+        )
+        self.conn.commit()
+
+    def load_activity(self, limit: int = 60) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT timestamp, product_id, action, price, reason "
+            "FROM signal_log ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # -- trades ------------------------------------------------------------
 
@@ -175,6 +201,7 @@ class Storage:
             "prices": prices,
             "positions": positions,
             "latest_signals": latest_signals,
+            "activity": self.load_activity(),
             "equity_curve": self.load_equity_curve(),
             "trades": [
                 {
