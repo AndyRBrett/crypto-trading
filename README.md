@@ -5,9 +5,9 @@ technical strategy, and simulates trades against a virtual portfolio — no real
 money, ever. Each trade is explained in plain English by **Claude**, and a
 static dashboard shows your equity curve, positions, and the bot's reasoning.
 
-> Status: **v1**. Local Python loop · SMA-crossover + RSI strategy ·
-> optional Claude news-sentiment signals · Claude trade explanations ·
-> static dashboard.
+> Status: **v1**. Local or cloud (scheduled) loop · trend-following EMA
+> strategy with trend/ADX/RSI filters + ATR risk management · optional Claude
+> news-sentiment signals · Claude trade explanations · installable PWA dashboard.
 
 ---
 
@@ -24,9 +24,13 @@ sentiment, natural-language strategy config).
 Every `poll_interval` seconds, for each market:
 
 1. **Fetch** recent candles from Coinbase.
-2. **Signal** — the strategy computes SMAs + RSI and emits `BUY` / `SELL` / `HOLD`
-   with a list of plain-English reasons.
-3. **Decide** — respecting current position, available cash, and position sizing.
+2. **Signal** — a trend-following EMA crossover, gated by a long-term trend
+   filter (trade with the trend), an ADX chop filter (only trade real trends),
+   RSI, and optional news sentiment. Emits `BUY` / `SELL` / `HOLD` with reasons.
+3. **Size & protect** — entries are sized by volatility (ATR) so each trade
+   risks a fixed % of equity; open positions are guarded by an ATR stop-loss, a
+   take-profit target, and a Chandelier trailing stop, with a cap on how many
+   positions can be open at once.
 4. **Execute** the simulated trade against the paper portfolio (with a fee).
 5. **Explain** — Claude turns the signal into a human-readable "why".
 6. **Persist** the trade + an equity snapshot to SQLite, and export
@@ -39,9 +43,9 @@ bot falls back to a templated explanation and keeps trading.
 bot/
   config.py        config from config.yaml + .env (secrets)
   market_data.py   Coinbase: public API (default) or Advanced SDK (your keys)
-  indicators.py    SMA / EMA / RSI  (pure, unit-tested)
+  indicators.py    SMA / EMA / RSI / ATR / ADX  (pure, unit-tested)
   sentiment.py     RSS news -> Claude sentiment score (optional)
-  strategy.py      SMA crossover + RSI filter (+ sentiment) -> signals
+  strategy.py      EMA crossover + trend/ADX/RSI filters (+ sentiment) -> signals
   portfolio.py     paper portfolio: cash, positions, cost basis, P&L
   storage.py       SQLite (durable) + dashboard JSON export
   explain.py       Claude trade explanations (+ deterministic fallback)
@@ -190,9 +194,12 @@ All settings live in `config.yaml` (see `config.example.yaml` for the full,
 commented list). Highlights:
 
 - `products` — Coinbase product IDs, e.g. `BTC-USD`, `ETH-USD`.
-- `starting_cash`, `fee_rate`, `buy_fraction` — the paper account.
-- `poll_interval`, `candle_granularity` — cadence (keep them aligned).
-- `strategy.{fast_period, slow_period, rsi_period, rsi_overbought, rsi_oversold}`.
+- `starting_cash`, `fee_rate` — the paper account.
+- `poll_interval`, `candle_granularity`, `candle_count` — cadence + history.
+- `strategy.{fast_period, slow_period, ma_type, trend_period, adx_min, ...}` —
+  the EMA crossover + trend/ADX/RSI filters.
+- `risk_per_trade_pct`, `max_position_pct`, `max_open_positions`,
+  `stop_loss_atr_mult`, `take_profit_atr_mult`, `trailing_stop` — risk controls.
 - `data_source` — `public` or `coinbase_advanced`.
 
 ## Testing
@@ -201,14 +208,17 @@ commented list). Highlights:
 python -m pytest
 ```
 
-Covers the indicators (SMA/EMA/RSI), the paper portfolio (fills, fees, cost
-basis, P&L, restart-replay), and the strategy's signal logic.
+Covers the indicators (SMA/EMA/RSI/ATR/ADX), the paper portfolio (fills, fees,
+cost basis, P&L, restart-replay), the strategy's signal logic (crossover, trend
+and ADX filters, sentiment gating), and the engine's risk layer (volatility
+sizing, stop-loss / take-profit / trailing-stop exits).
 
 ## Notes & caveats
 
 - **Paper only.** Nothing here places real orders. The portfolio is virtual.
-- The default strategy is a textbook SMA crossover — a learning scaffold, not
-  alpha. Tune it, or swap in your own in `strategy.py`.
+- The strategy is a sensible trend-following template with real risk management
+  — not guaranteed alpha. Tune the knobs in `config.yaml` or swap in your own
+  logic in `strategy.py`.
 - Restart-safe: portfolio state is reconstructed by replaying the trade log
   from SQLite, so you can stop and resume without losing history.
 

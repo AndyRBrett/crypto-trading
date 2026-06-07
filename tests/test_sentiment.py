@@ -58,8 +58,9 @@ def test_analyzer_caches_results():
 def _strategy():
     return Strategy(
         StrategyConfig(
-            fast_period=2, slow_period=4, rsi_period=2,
+            fast_period=2, slow_period=4, ma_type="sma", rsi_period=2,
             rsi_overbought=95.0, rsi_oversold=5.0,
+            trend_filter=False, adx_filter=False,
             sentiment_buy_veto=-0.4, sentiment_sell_trigger=-0.6,
         )
     )
