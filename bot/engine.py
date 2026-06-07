@@ -12,6 +12,7 @@ For each product on every tick:
 from __future__ import annotations
 
 import logging
+import time
 
 from .config import Config
 from .explain import Explainer
@@ -98,6 +99,14 @@ class Engine:
                 price,
                 "; ".join(signal.reasons),
             )
+            # Record every tick's decision (including HOLDs) as an activity log.
+            try:
+                self.storage.save_signal(
+                    time.time(), product_id, signal.action, price,
+                    signal.reasons[0] if signal.reasons else "",
+                )
+            except Exception as exc:  # never let logging break a tick
+                log.warning("could not record activity for %s: %s", product_id, exc)
 
             trade = self._manage(signal, price, candles, prices)
             if trade is not None:
