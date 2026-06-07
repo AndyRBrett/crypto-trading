@@ -1,7 +1,8 @@
-// Service worker: cache the app shell so the dashboard opens instantly and
-// works offline, but always fetch fresh data (state.json) from the network
-// when available, falling back to the last cached copy when offline.
-const CACHE = "cryptobot-v1";
+// Service worker: keep the app instant + offline-capable, but don't get stuck
+// on a stale version. Data (state.json) and the page itself (HTML) are
+// network-first — fresh when online, last-known copy when offline. Static
+// assets (icons, manifest) stay cache-first. Bump CACHE to force a refresh.
+const CACHE = "cryptobot-v2";
 const SHELL = [
   "./",
   "./index.html",
@@ -26,22 +27,30 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
+  const req = event.request;
+  const url = new URL(req.url);
 
-  // Data: network-first, fall back to cache (so the phone shows last-known state offline).
-  if (url.pathname.endsWith("state.json")) {
+  // Network-first for live data AND the page itself, so new versions load when
+  // online; fall back to the cached copy (or the app shell) when offline.
+  const networkFirst =
+    url.pathname.endsWith("state.json") ||
+    req.mode === "navigate" ||
+    url.pathname.endsWith("index.html") ||
+    url.pathname.endsWith("/");
+
+  if (networkFirst) {
     event.respondWith(
-      fetch(event.request)
+      fetch(req)
         .then((resp) => {
           const copy = resp.clone();
-          caches.open(CACHE).then((c) => c.put(event.request, copy));
+          caches.open(CACHE).then((c) => c.put(req, copy));
           return resp;
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => caches.match(req).then((r) => r || caches.match("./index.html")))
     );
     return;
   }
 
-  // App shell: cache-first, fall back to network.
-  event.respondWith(caches.match(event.request).then((r) => r || fetch(event.request)));
+  // Static assets: cache-first, fall back to network.
+  event.respondWith(caches.match(req).then((r) => r || fetch(req)));
 });
