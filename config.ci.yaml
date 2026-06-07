@@ -1,0 +1,16 @@
+# Config for the scheduled GitHub Actions run ("always-on" hosting).
+#
+# This is what the cloud bot uses (bot/main.py --config config.ci.yaml). It is
+# committed to the repo on purpose, so keep ONLY non-secret settings here.
+# Secrets (ANTHROPIC_API_KEY, the GitHub token) come from Actions secrets/env,
+# never from this file. Your local config.yaml stays separate and gitignored.
+
+products:
+  - BTC-USD
+  - ETH-USD
+
+# Publish state.json to the gh-pages branch so the dashboard updates.
+publish_enabled: true
+publish_repo: AndyRBrett/crypto-trading
+publish_branch: gh-pages
+publish_path: state.json

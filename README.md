@@ -144,8 +144,33 @@ Then open `https://<your-user>.github.io/<repo>/` on your phone and add it to
 your home screen. It refreshes every few seconds and works offline (showing the
 last fetched state). The data updates whenever the bot is running and pushing.
 
-> The bot must be running somewhere to push fresh data (your laptop, for now).
-> See the roadmap for always-on hosting.
+> The bot must be running somewhere to push fresh data. Run it on your laptop,
+> or set up always-on cloud runs (below) so it keeps going without you.
+
+## Always-on (run it in the cloud)
+
+`.github/workflows/run-bot.yml` runs the bot on a schedule via GitHub Actions —
+free, no server, and it keeps updating the dashboard even when your laptop is
+off. Each run is a fresh machine, so the paper portfolio (`trading.db`) is
+restored from and saved to a dedicated `bot-state` branch between ticks.
+`config.ci.yaml` holds the (non-secret) settings the cloud run uses.
+
+Setup:
+
+1. **Merge this to `main`** so the workflow exists on the default branch
+   (scheduled workflows only run from `main`).
+2. **(Optional) Add your Anthropic key** for Claude explanations: repo →
+   Settings → Secrets and variables → Actions → New repository secret →
+   `ANTHROPIC_API_KEY`. Without it, the cloud bot uses the templated rationale.
+   No GitHub token needed — Actions provides one automatically.
+3. **Kick off the first run:** Actions tab → "Run trading bot (always-on)" →
+   *Run workflow*. After that it runs hourly on its own.
+
+Notes:
+- Cron timing is approximate (GitHub may delay a run by several minutes).
+- The cloud and your laptop keep **separate** portfolios. Pick one as your
+  "real" run — if the cloud is on, you don't need the local loop.
+- Edit `config.ci.yaml` to change what the cloud bot trades or how it behaves.
 
 ## CLI
 
