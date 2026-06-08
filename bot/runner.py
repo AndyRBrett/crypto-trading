@@ -113,6 +113,7 @@ class Runner:
             db_path=acct.resolved_db_path(),
             strategy=acct.strategy,
             strategy_type=acct.strategy_type,
+            account_name=acct.name,
             fee_rate=pick(acct.fee_rate, base.fee_rate),
             risk_per_trade_pct=pick(acct.risk_per_trade_pct, base.risk_per_trade_pct),
             max_position_pct=pick(acct.max_position_pct, base.max_position_pct),
