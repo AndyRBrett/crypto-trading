@@ -57,6 +57,8 @@
   .filter { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
   .chip { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
   .chip.active { background: var(--accent); border-color: var(--accent); color: #06223f; font-weight: 600; }
+  .strategy-note { color: var(--muted); font-size: 12px; line-height: 1.55; margin: 10px 0 18px; max-width: 760px; }
+  .strategy-note strong { color: var(--text); font-weight: 600; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 8px; }
   .legend span::before { content: "—"; font-weight: 700; margin-right: 4px; }
   #notif-btn { background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 4px 10px; }
@@ -105,6 +107,7 @@
 </div>
 <main>
   <div class="filter" id="accountTabs"></div>
+  <p class="strategy-note" id="strategyNote"></p>
 
   <div class="cards" id="cards"></div>
 
@@ -400,10 +403,38 @@ function buildAccountView(state, name) {
   });
 }
 
+// Plain-English one-liners for each strategy, shown under the account tabs so
+// you can tell at a glance how the selected account is trading. Keys match the
+// strategy_type values the bot exports (see bot/strategies.py).
+const STRATEGY_INFO = {
+  ema_crossover: { name: "EMA crossover", desc: "a trend-follower — buys when the fast moving average crosses above the slow one (in step with the long-term trend, confirmed by ADX and filtered by RSI) and sells when momentum rolls over." },
+  rsi_mean_reversion: { name: "RSI mean reversion", desc: "a contrarian — buys when RSI shows the market is oversold and sells once price snaps back toward the middle, fading extremes instead of chasing them." },
+  donchian_breakout: { name: "Donchian breakout", desc: "a breakout rider — buys when price pushes above its recent high (the prior N-bar channel) and exits when it falls below its recent low." },
+};
+
+function renderStrategyNote(state) {
+  const el = document.getElementById("strategyNote");
+  if (!el) return;
+  const accts = state.accounts || [];
+  if (!accts.length) { el.innerHTML = ""; return; }
+  if (selectedAccount === "__total__") {
+    const seen = [];
+    accts.forEach(a => { if (a.strategy && !seen.includes(a.strategy)) seen.push(a.strategy); });
+    const list = seen.map(s => `<strong>${(STRATEGY_INFO[s] || {}).name || s}</strong>`).join(", ");
+    el.innerHTML = `All accounts combined — each trades its own strategy${list ? `: ${list}` : ""}. Pick a tab to see how it works.`;
+    return;
+  }
+  const acct = accts.find(a => a.name === selectedAccount);
+  const info = acct && STRATEGY_INFO[acct.strategy];
+  el.innerHTML = info
+    ? `<strong>${info.name}</strong> — ${info.desc}`
+    : (acct ? `Strategy: <strong>${acct.strategy}</strong>` : "");
+}
+
 function renderAccountTabs(state) {
   const el = document.getElementById("accountTabs");
   const accts = state.accounts || [];
-  if (!accts.length) { el.innerHTML = ""; return; }
+  if (!accts.length) { el.innerHTML = ""; renderStrategyNote(state); return; }
   const names = accts.map(a => a.name);
   if (selectedAccount !== "__total__" && !names.includes(selectedAccount)) {
     selectedAccount = "__total__";
@@ -416,6 +447,7 @@ function renderAccountTabs(state) {
   el.querySelectorAll("button").forEach(b => {
     b.onclick = () => { selectedAccount = b.dataset.acct; selectedCoin = "ALL"; if (lastState) renderState(lastState); };
   });
+  renderStrategyNote(state);
 }
 
 function renderState(state) {
@@ -427,6 +459,7 @@ function renderState(state) {
     renderAll(view);
   } else {
     document.getElementById("accountTabs").innerHTML = "";
+    document.getElementById("strategyNote").innerHTML = "";
     renderAll(state);
   }
 }
