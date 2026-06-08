@@ -18,6 +18,7 @@ from .config import Config
 from .coordinate import Coordinator
 from .explain import Explainer
 from .market_data import MarketData
+from .notifier import Notifier
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
 from .publish import Publisher
 from .sentiment import SentimentAnalyzer
@@ -52,6 +53,7 @@ class Engine:
         if self.analyzer is None and config.sentiment_enabled:
             self.analyzer = SentimentAnalyzer(config)
         self.publisher = publisher or Publisher(config)
+        self.notifier = Notifier(config.ntfy_topic, config.ntfy_server, config.ntfy_token)
 
         # Resume by replaying the persisted trade log.
         trades = self.storage.load_trades()
@@ -63,6 +65,11 @@ class Engine:
             log.info(
                 "Resumed from %d trades. Cash=$%.2f", len(trades), self.portfolio.cash
             )
+
+        # Peak equity is persisted in the meta table so a new portfolio
+        # all-time high survives restarts and GitHub Actions ephemeral VMs.
+        _peak = self.storage.get_meta("peak_equity")
+        self._peak_equity: float | None = float(_peak) if _peak else None
 
     def tick(self) -> list:
         """Run one decision cycle across all products. Returns executed trades."""
@@ -142,11 +149,13 @@ class Engine:
 
         # Snapshot equity using fresh prices, then export dashboard state.
         if prices:
+            current_equity = self.portfolio.total_equity(prices)
             self.storage.save_equity(
                 self.portfolio.cash,
                 self.portfolio.market_value(prices),
-                self.portfolio.total_equity(prices),
+                current_equity,
             )
+            self._maybe_notify_new_high(current_equity)
             self.storage.export_state(
                 self.config.dashboard_state_path,
                 self.config,
@@ -269,7 +278,43 @@ class Engine:
         )
         self.storage.save_trade(trade)
         log.info("EXECUTED %s | %s", trade.side, trade.explanation)
+        if trade.side == SELL and trade.realized_pnl > 0:
+            notional = trade.price * trade.quantity
+            pct = (trade.realized_pnl / notional) * 100 if notional > 0 else 0
+            self.notifier.send(
+                title=f"Profit: {trade.product_id} +${trade.realized_pnl:,.2f}",
+                message=(
+                    f"Sold {trade.quantity:.6g} {trade.product_id} @ ${trade.price:,.2f}\n"
+                    f"Profit: +${trade.realized_pnl:,.2f} ({pct:.1f}% of notional)\n"
+                    f"{trade.explanation}"
+                ),
+                tags="money_bag,white_check_mark",
+                priority="high",
+            )
         return trade
+
+    def _maybe_notify_new_high(self, current_equity: float) -> None:
+        """Send a notification when the portfolio reaches a new all-time high.
+
+        Requires at least 0.5% above the previous peak to avoid alerting on
+        every tick during a slow grind up.
+        """
+        threshold = (self._peak_equity or 0) * 1.005
+        if self._peak_equity is None or current_equity > threshold:
+            if self._peak_equity is not None:
+                change = current_equity - self._peak_equity
+                pct = change / self._peak_equity * 100
+                self.notifier.send(
+                    title=f"New portfolio high: ${current_equity:,.2f}",
+                    message=(
+                        f"Portfolio hit a new all-time high of ${current_equity:,.2f} "
+                        f"(+${change:,.2f} / +{pct:.1f}% above previous peak)"
+                    ),
+                    tags="rocket,chart_with_upwards_trend",
+                    priority="default",
+                )
+            self._peak_equity = current_equity
+            self.storage.set_meta("peak_equity", str(current_equity))
 
     def status(self) -> dict:
         prices = self.market_data.get_prices(self.config.products)

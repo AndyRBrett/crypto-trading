@@ -12,6 +12,9 @@ from bot.strategy import BUY
 
 
 class FakeStorage:
+    def __init__(self):
+        self._meta: dict = {}
+
     def load_trades(self):
         return []
 
@@ -23,6 +26,15 @@ class FakeStorage:
 
     def export_state(self, *a, **k):
         pass
+
+    def save_signal(self, *a, **k):
+        pass
+
+    def get_meta(self, key: str):
+        return self._meta.get(key)
+
+    def set_meta(self, key: str, value: str):
+        self._meta[key] = value
 
     def close(self):
         pass

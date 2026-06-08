@@ -85,3 +85,20 @@ lease_ttl_seconds: 1800   # cloud stands down while this laptop was seen < 30 mi
 state_branch: bot-state   # shared branch holding trading.db + driver.json
 state_db_path: trading.db
 lease_path: driver.json
+
+# Push notifications via ntfy.sh — get phone alerts without polling the dashboard.
+#
+# How to set up (takes ~2 minutes):
+#   1. Install the free "ntfy" app on your phone (iOS / Android).
+#   2. Pick a unique topic name, e.g. "andy-crypto-bot-abc123" (treat it like
+#      a password — anyone who knows the topic can subscribe).
+#   3. Subscribe to your topic inside the ntfy app.
+#   4. Set ntfy_topic below (or export NTFY_TOPIC=<topic> in your shell / CI).
+#
+# You'll get a "Profit" notification on every winning sell, and a
+# "New portfolio high" notification whenever the portfolio hits a fresh ATH.
+#
+# For private/access-controlled topics (ntfy.sh paid plan or self-hosted),
+# set NTFY_TOKEN in your environment / GitHub Actions secret instead of here.
+ntfy_topic: ""            # e.g. "andy-crypto-bot-abc123"  (NTFY_TOPIC env var also works)
+ntfy_server: https://ntfy.sh   # swap for a self-hosted server if desired
