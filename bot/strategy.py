@@ -42,6 +42,36 @@ class Signal:
     strength: float = 0.0  # 0..1, rough confidence for display
 
 
+def apply_sentiment(action, strength, snapshot, sentiment, config, reasons):
+    """Fold news sentiment into a price-based decision.
+
+    Sentiment confirms or vetoes; it never invents a BUY on its own. Shared by
+    all strategies so the gating logic stays consistent. Mutates ``snapshot``
+    and ``reasons`` in place; returns the (possibly updated) ``(action, strength)``.
+    """
+    if sentiment is None:
+        return action, strength
+    snapshot["sentiment_score"] = round(sentiment.score, 3)
+    snapshot["sentiment_label"] = sentiment.label
+    if action == BUY and sentiment.score <= config.sentiment_buy_veto:
+        reasons.append(
+            f"Vetoed BUY: news sentiment bearish "
+            f"({sentiment.score:+.2f}) — {sentiment.summary}"
+        )
+        return HOLD, 0.0
+    if action != BUY and sentiment.score <= config.sentiment_sell_trigger:
+        if action != SELL:
+            reasons.append(
+                f"Risk-off SELL: news sentiment strongly bearish "
+                f"({sentiment.score:+.2f}) — {sentiment.summary}"
+            )
+        return SELL, max(strength, min(1.0, abs(sentiment.score)))
+    reasons.append(f"News sentiment {sentiment.label} ({sentiment.score:+.2f}).")
+    if action == BUY and sentiment.score > 0:
+        strength = min(1.0, strength + 0.2)
+    return action, strength
+
+
 @dataclass
 class StrategyConfig:
     # Moving-average crossover.
@@ -64,6 +94,12 @@ class StrategyConfig:
     # News-sentiment gating (only applied when a Sentiment is supplied).
     sentiment_buy_veto: float = -0.4  # block BUYs when sentiment <= this
     sentiment_sell_trigger: float = -0.6  # risk-off SELL when sentiment <= this
+    # Donchian breakout (used by the "donchian_breakout" strategy).
+    donchian_period: int = 20  # entry channel: break the high of this many bars
+    donchian_exit_period: int = 10  # exit channel: break the low of this many bars
+    # RSI mean-reversion (used by the "rsi_mean_reversion" strategy).
+    rsi_mr_oversold: float = 30.0  # BUY when RSI <= this (oversold bounce)
+    rsi_mr_overbought: float = 55.0  # SELL when RSI >= this (reverted to mean)
 
 
 class Strategy:
@@ -188,30 +224,9 @@ class Strategy:
 
         # Fold in news sentiment, if available. Sentiment confirms or vetoes the
         # price-based decision; it never invents a BUY on its own.
-        if sentiment is not None:
-            snapshot["sentiment_score"] = round(sentiment.score, 3)
-            snapshot["sentiment_label"] = sentiment.label
-            if action == BUY and sentiment.score <= c.sentiment_buy_veto:
-                action = HOLD
-                strength = 0.0
-                reasons.append(
-                    f"Vetoed BUY: news sentiment bearish "
-                    f"({sentiment.score:+.2f}) — {sentiment.summary}"
-                )
-            elif action != BUY and sentiment.score <= c.sentiment_sell_trigger:
-                if action != SELL:
-                    reasons.append(
-                        f"Risk-off SELL: news sentiment strongly bearish "
-                        f"({sentiment.score:+.2f}) — {sentiment.summary}"
-                    )
-                action = SELL
-                strength = max(strength, min(1.0, abs(sentiment.score)))
-            else:
-                reasons.append(
-                    f"News sentiment {sentiment.label} ({sentiment.score:+.2f})."
-                )
-                if action == BUY and sentiment.score > 0:
-                    strength = min(1.0, strength + 0.2)
+        action, strength = apply_sentiment(
+            action, strength, snapshot, sentiment, c, reasons
+        )
 
         return Signal(
             product_id=product_id,

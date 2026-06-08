@@ -23,7 +23,8 @@ from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
 from .publish import Publisher
 from .sentiment import SentimentAnalyzer
 from .storage import Storage
-from .strategy import BUY, HOLD, SELL, Strategy
+from .strategies import make_strategy
+from .strategy import BUY, HOLD, SELL
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +48,8 @@ class Engine:
         if storage is None and self.coordinator.enabled:
             self.coordinator.pull_db(config.db_path)
         self.storage = storage or Storage(config.db_path)
-        self.strategy = Strategy(config.strategy)
+        strategy_type = getattr(config, "strategy_type", None) or "ema_crossover"
+        self.strategy = make_strategy(strategy_type, config.strategy)
         self.explainer = explainer or Explainer(config)
         self.analyzer = sentiment_analyzer
         if self.analyzer is None and config.sentiment_enabled:
@@ -61,6 +63,10 @@ class Engine:
             config.starting_cash, config.fee_rate, trades
         )
         self.latest_signals: dict = {}
+        # Last tick's market snapshot, surfaced for the multi-account Runner's
+        # combined dashboard export.
+        self.last_prices: dict = {}
+        self.last_price_history: dict = {}
         if trades:
             log.info(
                 "Resumed from %d trades. Cash=$%.2f", len(trades), self.portfolio.cash
@@ -146,6 +152,10 @@ class Engine:
             trade = self._manage(signal, price, candles, prices)
             if trade is not None:
                 executed.append(trade)
+
+        # Surface this tick's market snapshot for the Runner's combined export.
+        self.last_prices = prices
+        self.last_price_history = price_history
 
         # Snapshot equity using fresh prices, then export dashboard state.
         if prices:

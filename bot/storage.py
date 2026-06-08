@@ -16,6 +16,52 @@ from pathlib import Path
 from .portfolio import Portfolio, Trade
 
 
+def export_combined_state(
+    path: str,
+    account_blocks: list[dict],
+    prices: dict[str, float],
+    price_history: dict | None = None,
+) -> None:
+    """Write the unified multi-account ``state.json`` the dashboard reads.
+
+    Shared market data (prices, price_history) lives at the root and is deduped
+    across accounts; each account's per-account block goes in ``accounts``. A
+    ``portfolio_total`` summary aggregates equity/cash/P&L across all accounts.
+    """
+    total = {
+        "starting_cash": sum(b["starting_cash"] for b in account_blocks),
+        "cash": sum(b["cash"] for b in account_blocks),
+        "market_value": sum(b["market_value"] for b in account_blocks),
+        "equity": sum(b["equity"] for b in account_blocks),
+        "realized_pnl": sum(b["realized_pnl"] for b in account_blocks),
+        "unrealized_pnl": sum(b["unrealized_pnl"] for b in account_blocks),
+    }
+    total["total_return_pct"] = (
+        (total["equity"] / total["starting_cash"] - 1) * 100
+        if total["starting_cash"]
+        else 0.0
+    )
+    # Union of products across accounts, order-preserving.
+    products: list[str] = []
+    for b in account_blocks:
+        for pid in b.get("products", []):
+            if pid not in products:
+                products.append(pid)
+
+    state = {
+        "schema": "multi-account-v1",
+        "updated_at": time.time(),
+        "products": products,
+        "prices": prices,
+        "price_history": price_history or {},
+        "portfolio_total": total,
+        "accounts": account_blocks,
+    }
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(state, indent=2))
+
+
 class Storage:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -158,15 +204,20 @@ class Storage:
 
     # -- dashboard export --------------------------------------------------
 
-    def export_state(
+    def account_state(
         self,
-        path: str,
-        config,
         portfolio: Portfolio,
         prices: dict[str, float],
         latest_signals: dict,
-        price_history: dict | None = None,
-    ) -> None:
+        name: str = "",
+        strategy: str = "",
+        products: list | None = None,
+    ) -> dict:
+        """Per-account state block (no shared prices/price_history, no disk write).
+
+        Reused by both ``export_state`` (single account) and the Runner's
+        combined export. ``name``/``strategy``/``products`` describe the account.
+        """
         positions = []
         for pid, pos in portfolio.positions.items():
             if pos.quantity <= 0:
@@ -185,9 +236,10 @@ class Storage:
 
         recent = self.load_trades()[-50:][::-1]
         equity = portfolio.total_equity(prices)
-        state = {
-            "updated_at": time.time(),
-            "products": config.products,
+        return {
+            "name": name,
+            "strategy": strategy,
+            "products": products or [],
             "starting_cash": portfolio.starting_cash,
             "cash": portfolio.cash,
             "market_value": portfolio.market_value(prices),
@@ -199,10 +251,8 @@ class Storage:
             ),
             "realized_pnl": portfolio.realized_pnl(),
             "unrealized_pnl": portfolio.unrealized_pnl(prices),
-            "prices": prices,
             "positions": positions,
             "latest_signals": latest_signals,
-            "price_history": price_history or {},
             "activity": self.load_activity(),
             "equity_curve": self.load_equity_curve(),
             "trades": [
@@ -221,6 +271,26 @@ class Storage:
                 }
                 for t in recent
             ],
+        }
+
+    def export_state(
+        self,
+        path: str,
+        config,
+        portfolio: Portfolio,
+        prices: dict[str, float],
+        latest_signals: dict,
+        price_history: dict | None = None,
+    ) -> None:
+        block = self.account_state(
+            portfolio, prices, latest_signals, products=config.products
+        )
+        # Flat single-account shape (unchanged): shared market data at the root.
+        state = {
+            "updated_at": time.time(),
+            "prices": prices,
+            "price_history": price_history or {},
+            **block,
         }
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)

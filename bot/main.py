@@ -16,7 +16,7 @@ import os
 import time
 
 from .config import Config
-from .engine import Engine
+from .runner import Runner
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -27,9 +27,11 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
-def _print_status(engine: Engine) -> None:
-    s = engine.status()
-    print("\n=== Paper Portfolio ===")
+def _print_status(s: dict) -> None:
+    label = s.get("name", "")
+    strat = s.get("strategy", "")
+    header = f"=== {label} ({strat}) ===" if label else "=== Paper Portfolio ==="
+    print(f"\n{header}")
     print(f"  Cash:           ${s['cash']:,.2f}")
     print(f"  Equity:         ${s['equity']:,.2f}")
     print(f"  Total return:   {s['total_return_pct']:+.2f}%")
@@ -63,9 +65,15 @@ def main(argv: list[str] | None = None) -> int:
     config = Config.load(args.config)
 
     if args.command == "reset":
-        if os.path.exists(config.db_path):
-            os.remove(config.db_path)
-            print(f"Removed {config.db_path}")
+        removed = []
+        for acct in config.accounts:
+            path = acct.resolved_db_path()
+            if os.path.exists(path):
+                os.remove(path)
+                removed.append(path)
+        if removed:
+            for path in removed:
+                print(f"Removed {path}")
         else:
             print("Nothing to reset.")
         return 0
@@ -77,36 +85,39 @@ def main(argv: list[str] | None = None) -> int:
         ok = md.verify_credentials()
         print("Coinbase Advanced credentials:", "OK" if ok else "FAILED / not set")
         # Also sanity-check public data.
+        product = config.accounts[0].products[0] if config.accounts else config.products[0]
         try:
-            price = md._public_price(config.products[0])
-            print(f"Public price for {config.products[0]}: ${price:,.2f}")
+            price = md._public_price(product)
+            print(f"Public price for {product}: ${price:,.2f}")
         except Exception as exc:
             print(f"Public price check failed: {exc}")
         return 0 if ok else 1
 
-    engine = Engine(config)
+    runner = Runner(config)
     try:
         if args.command == "status":
-            _print_status(engine)
+            for s in runner.status():
+                _print_status(s)
         elif args.command == "once":
-            trades = engine.tick()
+            trades = runner.tick()
             print(f"Tick complete. {len(trades)} trade(s) executed.")
             for t in trades:
                 print(f"  {t.side} {t.product_id}: {t.explanation}")
-            _print_status(engine)
+            for s in runner.status():
+                _print_status(s)
         elif args.command == "run":
             logging.getLogger(__name__).info(
-                "Starting loop: %d product(s), every %ds. Ctrl+C to stop.",
-                len(config.products),
+                "Starting loop: %d account(s), every %ds. Ctrl+C to stop.",
+                len(runner.engines),
                 config.poll_interval,
             )
             while True:
-                engine.tick()
+                runner.tick()
                 time.sleep(config.poll_interval)
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
-        engine.close()
+        runner.close()
     return 0
 
 

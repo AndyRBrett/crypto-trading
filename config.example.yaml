@@ -37,6 +37,47 @@ strategy:
   atr_period: 14                # volatility, used for sizing + stops
   sentiment_buy_veto: -0.4      # block BUYs when news sentiment <= this
   sentiment_sell_trigger: -0.6  # risk-off SELL when news sentiment <= this
+  # Extra knobs for the alternative strategies (see `accounts` below):
+  donchian_period: 20           # donchian_breakout: entry channel lookback
+  donchian_exit_period: 10      # donchian_breakout: exit channel lookback
+  rsi_mr_oversold: 30           # rsi_mean_reversion: BUY when RSI <= this
+  rsi_mr_overbought: 55         # rsi_mean_reversion: SELL when RSI >= this
+
+# Multiple paper accounts, each running a DIFFERENT strategy. Omit this whole
+# block to run a single account from the top-level `products`/`strategy` above
+# (the original behavior). When present, `accounts` takes over.
+#
+# strategy_type picks the algorithm:
+#   ema_crossover       trend-following EMA crossover (the default/original)
+#   rsi_mean_reversion  counter-trend: buy oversold RSI, sell back toward the mean
+#   donchian_breakout   breakout: buy new N-bar highs, exit on M-bar lows
+#
+# Each account gets its own products, starting_cash, and SQLite DB
+# (trading.<name>.db). Per-account `strategy:` overrides merge over the
+# top-level strategy defaults. Risk params are inherited from the top level
+# unless overridden per account.
+accounts:
+  - name: trend
+    strategy_type: ema_crossover
+    products: [BTC-USD, ETH-USD]
+    starting_cash: 10000
+
+  - name: mean_reversion
+    strategy_type: rsi_mean_reversion
+    products: [BTC-USD, SOL-USD]
+    starting_cash: 10000
+    strategy:
+      rsi_period: 14
+      rsi_mr_oversold: 30
+      rsi_mr_overbought: 55
+
+  - name: breakout
+    strategy_type: donchian_breakout
+    products: [ETH-USD, SOL-USD]
+    starting_cash: 10000
+    strategy:
+      donchian_period: 20
+      donchian_exit_period: 10
 
 # Risk management: volatility-based sizing and protective exits.
 risk_per_trade_pct: 0.01     # risk ~1% of equity per trade (sized off the stop)

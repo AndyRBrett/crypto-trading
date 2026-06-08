@@ -19,6 +19,40 @@ from .sentiment import DEFAULT_FEEDS
 from .strategy import StrategyConfig
 
 
+def _sanitize_name(name: str) -> str:
+    """Filesystem-safe slug for deriving per-account db paths."""
+    return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name)
+
+
+@dataclass
+class AccountConfig:
+    """One paper-trading account: its own strategy, products, cash, and DB.
+
+    Risk fields default to ``None`` meaning "inherit the top-level ``Config``
+    value"; set one to override it for just this account.
+    """
+
+    name: str
+    strategy_type: str = "ema_crossover"
+    strategy: StrategyConfig = field(default_factory=StrategyConfig)
+    products: list[str] = field(default_factory=lambda: ["BTC-USD"])
+    starting_cash: float = 10_000.0
+    db_path: str = ""  # defaults to trading.<name>.db when empty
+
+    # Optional per-account risk overrides (None -> inherit from Config).
+    fee_rate: float | None = None
+    risk_per_trade_pct: float | None = None
+    max_position_pct: float | None = None
+    max_open_positions: int | None = None
+    stop_loss_atr_mult: float | None = None
+    take_profit_atr_mult: float | None = None
+    trailing_stop: bool | None = None
+    fallback_stop_pct: float | None = None
+
+    def resolved_db_path(self) -> str:
+        return self.db_path or f"trading.{_sanitize_name(self.name)}.db"
+
+
 def _load_dotenv(path: str = ".env") -> None:
     """Minimal .env loader (no external dependency)."""
     p = Path(path)
@@ -49,8 +83,16 @@ class Config:
     data_source: str = "public"  # kept for backward compat; CCXT is now used for all sources
     exchange: str = "coinbase"   # any CCXT exchange id (coinbase, kraken, binance, ...)
 
-    # Strategy.
+    # Strategy. ``strategy_type`` selects the algorithm from the registry in
+    # bot/strategies.py ("ema_crossover" default; "rsi_mean_reversion",
+    # "donchian_breakout", ...). ``strategy`` holds the shared tunables.
+    strategy_type: str = "ema_crossover"
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
+
+    # Multiple paper accounts, each with its own strategy/products/cash/DB. When
+    # empty, Config.load synthesizes a single "default" account from the
+    # top-level products/strategy/starting_cash/db_path (backward compatible).
+    accounts: list = field(default_factory=list)
 
     # Risk management (engine-level sizing + protective exits).
     risk_per_trade_pct: float = 0.01  # risk ~1% of equity per trade on the stop
@@ -114,15 +156,47 @@ class Config:
 
             data = yaml.safe_load(p.read_text()) or {}
 
-        strategy_data = data.pop("strategy", {}) or {}
         valid_strategy = {f.name for f in fields(StrategyConfig)}
-        strategy = StrategyConfig(
-            **{k: v for k, v in strategy_data.items() if k in valid_strategy}
-        )
+        strategy_data = data.pop("strategy", {}) or {}
 
-        valid = {f.name for f in fields(cls)} - {"strategy"}
+        def _build_strategy(overrides: dict | None) -> StrategyConfig:
+            merged = {**strategy_data, **(overrides or {})}
+            return StrategyConfig(
+                **{k: v for k, v in merged.items() if k in valid_strategy}
+            )
+
+        strategy = _build_strategy(None)
+
+        accounts_data = data.pop("accounts", None) or []
+
+        valid = {f.name for f in fields(cls)} - {"strategy", "accounts"}
         kwargs = {k: v for k, v in data.items() if k in valid}
         cfg = cls(strategy=strategy, **kwargs)
+
+        # Build per-account configs. Each account's `strategy:` block is merged
+        # over the top-level strategy defaults; unknown keys are ignored.
+        valid_account = {f.name for f in fields(AccountConfig)} - {"strategy"}
+        accounts: list[AccountConfig] = []
+        for entry in accounts_data:
+            entry = dict(entry or {})
+            acct_strategy = _build_strategy(entry.pop("strategy", None))
+            kw = {k: v for k, v in entry.items() if k in valid_account}
+            accounts.append(AccountConfig(strategy=acct_strategy, **kw))
+
+        # Backward compat: no `accounts:` -> one "default" account mirroring the
+        # top-level fields, so the legacy single-account path is unchanged.
+        if not accounts:
+            accounts.append(
+                AccountConfig(
+                    name="default",
+                    strategy_type=cfg.strategy_type,
+                    strategy=cfg.strategy,
+                    products=cfg.products,
+                    starting_cash=cfg.starting_cash,
+                    db_path=cfg.db_path,
+                )
+            )
+        cfg.accounts = accounts
 
         # Secrets always come from the environment.
         cfg.coinbase_api_key = os.environ.get("COINBASE_API_KEY", "")

@@ -104,6 +104,8 @@
   </div>
 </div>
 <main>
+  <div class="filter" id="accountTabs"></div>
+
   <div class="cards" id="cards"></div>
 
   <div class="filter" id="filter"></div>
@@ -339,8 +341,94 @@ function renderFilter(s) {
     `<button class="chip ${c === selectedCoin ? "active" : ""}" data-coin="${c}">${c === "ALL" ? "All" : c}</button>`
   ).join("");
   el.querySelectorAll("button").forEach(b => {
-    b.onclick = () => { selectedCoin = b.dataset.coin; if (lastState) renderAll(lastState); };
+    b.onclick = () => { selectedCoin = b.dataset.coin; if (lastState) renderState(lastState); };
   });
+}
+
+// --- Multi-account support -------------------------------------------------
+// The bot exports a combined state.json with an `accounts` array (plus shared
+// `prices`/`price_history` at the root and a `portfolio_total` summary). We add
+// a row of account tabs and reuse the existing single-account renderers by
+// feeding them one account's block (or an aggregated "Total" view) at a time.
+// An older flat state.json (no `accounts`) still renders via the fallback.
+
+let selectedAccount = null;  // account name, or "__total__"
+
+function combineEquityCurves(accounts) {
+  const curves = accounts.map(a => a.equity_curve || []).filter(c => c.length);
+  if (!curves.length) return [];
+  const n = Math.min(...curves.map(c => c.length));
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let equity = 0, cash = 0, mv = 0, ts = 0;
+    for (const c of curves) {
+      const row = c[c.length - n + i];
+      equity += row.equity; cash += row.cash; mv += row.market_value;
+      ts = Math.max(ts, row.timestamp || 0);
+    }
+    out.push({ timestamp: ts, equity, cash, market_value: mv });
+  }
+  return out;
+}
+
+function buildTotalView(state) {
+  const t = state.portfolio_total || {};
+  const accts = state.accounts || [];
+  const trades = [].concat(...accts.map(a => a.trades || []))
+    .sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
+  const activity = [].concat(...accts.map(a => a.activity || []))
+    .sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
+  const positions = [].concat(...accts.map(a => a.positions || []));
+  const latest = {};
+  accts.forEach(a => Object.entries(a.latest_signals || {}).forEach(([k, v]) => { latest[k] = v; }));
+  return Object.assign({}, t, {
+    updated_at: state.updated_at,
+    products: state.products,
+    prices: state.prices,
+    price_history: state.price_history,
+    positions, latest_signals: latest, activity, trades,
+    equity_curve: combineEquityCurves(accts),
+  });
+}
+
+function buildAccountView(state, name) {
+  const a = (state.accounts || []).find(x => x.name === name) || state.accounts[0];
+  return Object.assign({}, a, {
+    updated_at: state.updated_at,
+    prices: state.prices,
+    price_history: state.price_history,
+  });
+}
+
+function renderAccountTabs(state) {
+  const el = document.getElementById("accountTabs");
+  const accts = state.accounts || [];
+  if (!accts.length) { el.innerHTML = ""; return; }
+  const names = accts.map(a => a.name);
+  if (selectedAccount !== "__total__" && !names.includes(selectedAccount)) {
+    selectedAccount = "__total__";
+  }
+  const tabs = [{ key: "__total__", label: "Total" }]
+    .concat(accts.map(a => ({ key: a.name, label: `${a.name} · ${a.strategy}` })));
+  el.innerHTML = tabs.map(t =>
+    `<button class="chip ${t.key === selectedAccount ? "active" : ""}" data-acct="${t.key}">${t.label}</button>`
+  ).join("");
+  el.querySelectorAll("button").forEach(b => {
+    b.onclick = () => { selectedAccount = b.dataset.acct; selectedCoin = "ALL"; if (lastState) renderState(lastState); };
+  });
+}
+
+function renderState(state) {
+  if (state && Array.isArray(state.accounts)) {
+    renderAccountTabs(state);
+    const view = selectedAccount === "__total__"
+      ? buildTotalView(state)
+      : buildAccountView(state, selectedAccount);
+    renderAll(view);
+  } else {
+    document.getElementById("accountTabs").innerHTML = "";
+    renderAll(state);
+  }
 }
 
 // Exponential moving average aligned to the input (leading nulls until seeded).
@@ -469,7 +557,7 @@ async function refresh() {
     const res = await fetch("state.json?t=" + Date.now());
     if (!res.ok) throw new Error("state.json not found");
     lastState = await res.json();
-    renderAll(lastState);
+    renderState(lastState);
   } catch (e) {
     document.getElementById("updated").textContent = "waiting for bot output (state.json)…";
   }
