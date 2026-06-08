@@ -94,6 +94,11 @@ class Config:
     # top-level products/strategy/starting_cash/db_path (backward compatible).
     accounts: list = field(default_factory=list)
 
+    # Name of the account this Config drives (set by the Runner per account).
+    # Surfaced in push-notification titles so multi-account alerts are
+    # distinguishable. Empty / "default" means the single-account path.
+    account_name: str = ""
+
     # Risk management (engine-level sizing + protective exits).
     risk_per_trade_pct: float = 0.01  # risk ~1% of equity per trade on the stop
     max_position_pct: float = 0.30  # cap any single position at 30% of equity

@@ -282,6 +282,12 @@ class Engine:
             return None
         return self._finalize(trade, price)
 
+    def _notif_prefix(self) -> str:
+        """`[name] ` tag for multi-account push notifications; empty for the
+        single-account/default path so legacy alerts read exactly as before."""
+        name = getattr(self.config, "account_name", "")
+        return f"[{name}] " if name and name != "default" else ""
+
     def _finalize(self, trade, price):
         trade.explanation = self.explainer.explain(
             trade, self.portfolio, {trade.product_id: price}
@@ -292,7 +298,7 @@ class Engine:
             notional = trade.price * trade.quantity
             pct = (trade.realized_pnl / notional) * 100 if notional > 0 else 0
             self.notifier.send(
-                title=f"Profit: {trade.product_id} +${trade.realized_pnl:,.2f}",
+                title=f"{self._notif_prefix()}Profit: {trade.product_id} +${trade.realized_pnl:,.2f}",
                 message=(
                     f"Sold {trade.quantity:.6g} {trade.product_id} @ ${trade.price:,.2f}\n"
                     f"Profit: +${trade.realized_pnl:,.2f} ({pct:.1f}% of notional)\n"
@@ -315,7 +321,7 @@ class Engine:
                 change = current_equity - self._peak_equity
                 pct = change / self._peak_equity * 100
                 self.notifier.send(
-                    title=f"New portfolio high: ${current_equity:,.2f}",
+                    title=f"{self._notif_prefix()}New portfolio high: ${current_equity:,.2f}",
                     message=(
                         f"Portfolio hit a new all-time high of ${current_equity:,.2f} "
                         f"(+${change:,.2f} / +{pct:.1f}% above previous peak)"

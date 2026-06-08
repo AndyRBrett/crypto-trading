@@ -108,6 +108,29 @@ def test_runner_status_per_account(tmp_path):
     runner.close()
 
 
+def test_runner_tags_engines_with_account_name(tmp_path):
+    cfg = _cfg(tmp_path)
+    runner = Runner(cfg, market_data=CountingMarketData())
+    by_name = {acct.name: eng for acct, eng in runner.engines}
+    # Each engine knows its account name and tags notifications with it.
+    assert by_name["trend"].config.account_name == "trend"
+    assert by_name["breakout"]._notif_prefix() == "[breakout] "
+    runner.close()
+
+
+def test_default_account_has_no_notification_prefix(tmp_path):
+    # Back-compat: the synthesized single "default" account keeps the original
+    # un-prefixed notification titles.
+    p = tmp_path / "c.yaml"
+    p.write_text("products: [BTC-USD]\nsentiment_enabled: false\n")
+    cfg = Config.load(str(p))
+    cfg.dashboard_state_path = str(tmp_path / "state.json")
+    runner = Runner(cfg, market_data=CountingMarketData())
+    eng = runner.engines[0][1]
+    assert eng._notif_prefix() == ""
+    runner.close()
+
+
 def test_runner_cloud_stands_down_when_laptop_active(tmp_path):
     cfg = _cfg(tmp_path)
     cfg.driver_role = "cloud"
