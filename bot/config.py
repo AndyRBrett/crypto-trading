@@ -91,11 +91,12 @@ class Config:
     state_db_path: str = "trading.db"  # path of the shared DB on state_branch
     lease_path: str = "driver.json"  # path of the lease on state_branch
 
-    # Push notifications via ntfy.sh.  Set ntfy_topic (or NTFY_TOPIC env var)
-    # and install the ntfy app to get phone alerts without polling the dashboard.
-    ntfy_topic: str = ""          # subscribe to this topic in the ntfy app
-    ntfy_server: str = "https://ntfy.sh"  # swap for a self-hosted server if desired
-    ntfy_token: str = ""          # required only for access-controlled topics
+    # Web Push notifications through the dashboard PWA.
+    # Enable from the dashboard's "Enable Notifications" button, then copy
+    # the subscription JSON into the PUSH_SUBSCRIPTION GitHub Actions secret.
+    push_subscription: str = ""   # JSON from pushManager.subscribe() — via PUSH_SUBSCRIPTION env
+    vapid_private_key: str = ""   # base64url raw P-256 scalar   — via VAPID_PRIVATE_KEY env
+    vapid_claims_email: str = "mailto:bot@example.com"  # VAPID contact (can stay default)
 
     # Secrets (populated from env, never written to disk by us).
     coinbase_api_key: str = ""
@@ -128,7 +129,7 @@ class Config:
         cfg.coinbase_api_secret = os.environ.get("COINBASE_API_SECRET", "")
         cfg.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         cfg.github_token = os.environ.get("GITHUB_TOKEN", "")
-        # ntfy_topic can live in config.yaml or be supplied via env (useful for CI).
-        cfg.ntfy_topic = os.environ.get("NTFY_TOPIC", cfg.ntfy_topic)
-        cfg.ntfy_token = os.environ.get("NTFY_TOKEN", cfg.ntfy_token)
+        # Push notification secrets always come from the environment.
+        cfg.push_subscription = os.environ.get("PUSH_SUBSCRIPTION", "")
+        cfg.vapid_private_key = os.environ.get("VAPID_PRIVATE_KEY", "")
         return cfg

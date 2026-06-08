@@ -86,19 +86,20 @@ state_branch: bot-state   # shared branch holding trading.db + driver.json
 state_db_path: trading.db
 lease_path: driver.json
 
-# Push notifications via ntfy.sh — get phone alerts without polling the dashboard.
+# Push notifications via the dashboard PWA — get phone alerts without polling.
 #
-# How to set up (takes ~2 minutes):
-#   1. Install the free "ntfy" app on your phone (iOS / Android).
-#   2. Pick a unique topic name, e.g. "andy-crypto-bot-abc123" (treat it like
-#      a password — anyone who knows the topic can subscribe).
-#   3. Subscribe to your topic inside the ntfy app.
-#   4. Set ntfy_topic below (or export NTFY_TOPIC=<topic> in your shell / CI).
+# How to set up (one-time, takes ~2 minutes):
+#   1. Open the dashboard in Safari on your iPhone (or Chrome on Android).
+#      On iOS, add it to your Home Screen first so push works.
+#   2. Tap the 🔔 bell icon in the top-right corner.
+#   3. Allow notifications when the browser prompts.
+#   4. Copy the subscription JSON that appears.
+#   5. Add it as a GitHub Actions secret named PUSH_SUBSCRIPTION.
+#   6. Add VAPID_PRIVATE_KEY = bKgEBxRtFXNF4W9GKFqDN1IKpdATeUm52fM9A9RWH4E
+#      as a second GitHub Actions secret.
 #
-# You'll get a "Profit" notification on every winning sell, and a
-# "New portfolio high" notification whenever the portfolio hits a fresh ATH.
+# You'll get a "Profit" alert on every winning sell and a "New portfolio high"
+# alert whenever the portfolio hits a fresh all-time high.
 #
-# For private/access-controlled topics (ntfy.sh paid plan or self-hosted),
-# set NTFY_TOKEN in your environment / GitHub Actions secret instead of here.
-ntfy_topic: ""            # e.g. "andy-crypto-bot-abc123"  (NTFY_TOPIC env var also works)
-ntfy_server: https://ntfy.sh   # swap for a self-hosted server if desired
+# No extra app to install — notifications come through the dashboard itself.
+vapid_claims_email: mailto:bot@example.com  # optional contact for VAPID

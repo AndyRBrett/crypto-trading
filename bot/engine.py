@@ -53,7 +53,7 @@ class Engine:
         if self.analyzer is None and config.sentiment_enabled:
             self.analyzer = SentimentAnalyzer(config)
         self.publisher = publisher or Publisher(config)
-        self.notifier = Notifier(config.ntfy_topic, config.ntfy_server, config.ntfy_token)
+        self.notifier = Notifier(config.push_subscription, config.vapid_private_key, config.vapid_claims_email)
 
         # Resume by replaying the persisted trade log.
         trades = self.storage.load_trades()

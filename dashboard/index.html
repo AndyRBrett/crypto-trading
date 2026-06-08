@@ -59,6 +59,16 @@
   .chip.active { background: var(--accent); border-color: var(--accent); color: #06223f; font-weight: 600; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 8px; }
   .legend span::before { content: "—"; font-weight: 700; margin-right: 4px; }
+  #notif-btn { background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 4px 10px; }
+  #notif-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #notif-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.65); z-index: 100; align-items: center; justify-content: center; padding: 24px; }
+  #notif-modal.open { display: flex; }
+  #notif-box { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 24px; max-width: 560px; width: 100%; }
+  #notif-box h3 { margin: 0 0 12px; font-size: 16px; }
+  #notif-box p { color: var(--muted); font-size: 13px; margin: 0 0 12px; line-height: 1.55; }
+  #notif-json { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: monospace; font-size: 11px; padding: 10px; resize: vertical; min-height: 90px; }
+  #notif-copy { background: var(--accent); border: none; border-radius: 8px; color: #06223f; cursor: pointer; font-size: 13px; font-weight: 600; margin-top: 10px; padding: 8px 18px; }
+  #notif-close { background: none; border: none; color: var(--muted); cursor: pointer; float: right; font-size: 20px; line-height: 1; margin: -4px -4px 0 0; }
   .chart-head { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 8px; min-height: 24px; flex-wrap: wrap; }
   .chart-head .price { font-size: 20px; font-weight: 700; }
   .chart-head .chg { font-size: 13px; font-weight: 600; }
@@ -78,7 +88,21 @@
 <header>
   <h1>🤖 Crypto Paper Trading Bot</h1>
   <span class="updated" id="updated">loading…</span>
+  <button id="notif-btn" title="Enable push notifications" onclick="openNotifModal()">🔔</button>
 </header>
+
+<!-- Push-notification subscription modal -->
+<div id="notif-modal" onclick="if(event.target===this)closeNotifModal()">
+  <div id="notif-box">
+    <button id="notif-close" onclick="closeNotifModal()">×</button>
+    <h3>Enable push notifications</h3>
+    <div id="notif-body">
+      <p>Get a push notification whenever the bot makes a profit or hits a new portfolio high — directly through this app, no extra install needed.</p>
+      <p>Tap <strong>Subscribe</strong> and your browser will ask for permission. Then copy the JSON that appears and add it as a GitHub Actions secret named <code>PUSH_SUBSCRIPTION</code>.</p>
+      <button id="notif-copy" onclick="doSubscribe()">Subscribe &amp; copy JSON</button>
+    </div>
+  </div>
+</div>
 <main>
   <div class="cards" id="cards"></div>
 
@@ -457,6 +481,60 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   });
+}
+
+// --- Push notification subscription ---
+
+const VAPID_PUBLIC_KEY = "BFJPouzIXD3_ZKLdZZurK3fMTL2O91Q3T4EMVttesHmVIe6EWEfQzR-6ksDuzJSfVrj0XYvHEUty3bsPszOBGG4";
+
+function _urlB64ToUint8(b64) {
+  const pad = "=".repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+function openNotifModal() { document.getElementById("notif-modal").classList.add("open"); }
+function closeNotifModal() { document.getElementById("notif-modal").classList.remove("open"); }
+
+async function doSubscribe() {
+  const btn = document.getElementById("notif-copy");
+  btn.disabled = true;
+  btn.textContent = "Subscribing…";
+  try {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      throw new Error("Push notifications are not supported in this browser.\nOn iOS, open this page in Safari and add it to your Home Screen first.");
+    }
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") throw new Error("Notification permission denied.");
+
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: _urlB64ToUint8(VAPID_PUBLIC_KEY),
+    });
+    const json = JSON.stringify(sub);
+
+    // Show the JSON + instructions
+    document.getElementById("notif-body").innerHTML = `
+      <p>✅ Subscribed! Copy the JSON below and add it as a GitHub Actions secret named <strong>PUSH_SUBSCRIPTION</strong> in your repo's Settings → Secrets → Actions.</p>
+      <textarea id="notif-json" readonly>${json}</textarea>
+      <button id="notif-copy" onclick="copySubJson()">Copy to clipboard</button>
+      <p style="margin-top:10px">Also add <strong>VAPID_PRIVATE_KEY</strong> = <code>bKgEBxRtFXNF4W9GKFqDN1IKpdATeUm52fM9A9RWH4E</code> as a secret if you haven't already.</p>
+    `;
+  } catch (err) {
+    document.getElementById("notif-body").innerHTML =
+      `<p style="color:var(--red)">${err.message}</p><p><button id="notif-copy" onclick="closeNotifModal()">Close</button></p>`;
+  }
+}
+
+async function copySubJson() {
+  const ta = document.getElementById("notif-json");
+  try {
+    await navigator.clipboard.writeText(ta.value);
+    document.getElementById("notif-copy").textContent = "Copied!";
+  } catch (_) {
+    ta.select();
+  }
 }
 </script>
 </body>
