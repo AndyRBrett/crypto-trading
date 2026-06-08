@@ -46,11 +46,13 @@ bot/
   indicators.py    SMA / EMA / RSI / ATR / ADX  (pure, unit-tested)
   sentiment.py     RSS news -> Claude sentiment score (optional)
   strategy.py      EMA crossover + trend/ADX/RSI filters (+ sentiment) -> signals
+  strategies.py    strategy registry + RSI-mean-reversion & Donchian-breakout
   portfolio.py     paper portfolio: cash, positions, cost basis, P&L
   storage.py       SQLite (durable) + dashboard JSON export
   explain.py       Claude trade explanations (+ deterministic fallback)
   publish.py       push state.json to GitHub Pages (phone viewing)
-  engine.py        one tick: data -> signal -> trade -> explain -> persist
+  engine.py        one tick for ONE account: data -> signal -> trade -> persist
+  runner.py        orchestrates multiple accounts -> one combined dashboard
   main.py          CLI: once / run / status / verify / reset
 dashboard/
   index.html       static PWA dashboard (reads state.json)
@@ -227,6 +229,39 @@ commented list). Highlights:
 - `risk_per_trade_pct`, `max_position_pct`, `max_open_positions`,
   `stop_loss_atr_mult`, `take_profit_atr_mult`, `trailing_stop` — risk controls.
 - `data_source` — `public` or `coinbase_advanced`.
+
+### Multiple accounts, multiple strategies
+
+Add an `accounts:` block to run several independent paper accounts side by side,
+each with its own strategy, markets, starting cash, and SQLite DB
+(`trading.<name>.db`) — all surfaced in one dashboard with per-account tabs and a
+portfolio-total summary. Omit `accounts:` to keep the original single-account
+behavior. `strategy_type` selects the algorithm from the registry in
+`strategies.py`:
+
+- `ema_crossover` — trend-following EMA crossover (the original/default).
+- `rsi_mean_reversion` — counter-trend: buy oversold RSI, sell back toward the mean.
+- `donchian_breakout` — breakout: buy new N-bar highs, exit on M-bar lows.
+
+```yaml
+accounts:
+  - name: trend
+    strategy_type: ema_crossover
+    products: [BTC-USD, ETH-USD]
+    starting_cash: 10000
+  - name: mean_reversion
+    strategy_type: rsi_mean_reversion
+    products: [BTC-USD, SOL-USD]
+    starting_cash: 10000
+  - name: breakout
+    strategy_type: donchian_breakout
+    products: [ETH-USD, SOL-USD]
+    starting_cash: 10000
+```
+
+Per-account `strategy:` overrides merge over the top-level strategy defaults, and
+risk controls are inherited unless overridden per account. See
+`config.example.yaml` for the fully commented version.
 
 ## Testing
 

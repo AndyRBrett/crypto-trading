@@ -5,14 +5,11 @@
 # Secrets (ANTHROPIC_API_KEY, the GitHub token) come from Actions secrets/env,
 # never from this file. Your local config.yaml stays separate and gitignored.
 
-products:
-  - BTC-USD
-  - ETH-USD
-
 # 300 candles so the 200-period trend filter has enough history.
 candle_count: 300
 
-# Trend-following EMA crossover, filtered by trend + ADX + RSI + sentiment.
+# Shared strategy defaults. Each account below inherits these and overrides as
+# needed. (Top-level `products`/`strategy` are only used if `accounts` is omitted.)
 strategy:
   fast_period: 20
   slow_period: 50
@@ -28,6 +25,28 @@ strategy:
   atr_period: 14
   sentiment_buy_veto: -0.4
   sentiment_sell_trigger: -0.6
+  donchian_period: 20
+  donchian_exit_period: 10
+  rsi_mr_oversold: 30
+  rsi_mr_overbought: 55
+
+# Three paper accounts, each running a different strategy. Each keeps its own
+# portfolio in trading.<name>.db (shared to the bot-state branch).
+accounts:
+  - name: trend
+    strategy_type: ema_crossover
+    products: [BTC-USD, ETH-USD]
+    starting_cash: 10000
+
+  - name: mean_reversion
+    strategy_type: rsi_mean_reversion
+    products: [BTC-USD, SOL-USD]
+    starting_cash: 10000
+
+  - name: breakout
+    strategy_type: donchian_breakout
+    products: [ETH-USD, SOL-USD]
+    starting_cash: 10000
 
 # Risk management: volatility-based sizing and protective exits.
 risk_per_trade_pct: 0.01

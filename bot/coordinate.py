@@ -137,6 +137,49 @@ class Coordinator:
             return False
         return self._put_file(self.config.state_db_path, data, "Update portfolio state [skip ci]")
 
+    # -- per-account portfolios (multi-account) ----------------------------
+
+    def _remote_db_path(self, account_name: str) -> str:
+        """Remote path on the state branch for an account's DB.
+
+        The synthesized single "default" account keeps using the legacy
+        ``state_db_path`` ("trading.db") so existing cloud history isn't orphaned.
+        """
+        if account_name == "default":
+            return self.config.state_db_path
+        return f"trading.{account_name}.db"
+
+    def pull_db_for(self, account_name: str, local_path: str) -> bool:
+        """Pull one account's shared DB. Call before opening its sqlite file."""
+        if not self.enabled:
+            return False
+        remote = self._remote_db_path(account_name)
+        data, sha = self._get_file(remote)
+        self._sha[remote] = sha
+        if data is None:
+            log.info("coordinate: no shared portfolio yet for %s.", account_name)
+            return False
+        try:
+            with open(local_path, "wb") as f:
+                f.write(data)
+        except OSError as exc:
+            log.warning("coordinate: could not write %s: %s", local_path, exc)
+            return False
+        log.info("coordinate: pulled shared portfolio for %s.", account_name)
+        return True
+
+    def push_db_for(self, account_name: str, local_path: str) -> bool:
+        if not self.enabled:
+            return False
+        remote = self._remote_db_path(account_name)
+        try:
+            with open(local_path, "rb") as f:
+                data = f.read()
+        except OSError as exc:
+            log.warning("coordinate: could not read %s: %s", local_path, exc)
+            return False
+        return self._put_file(remote, data, f"Update {account_name} portfolio [skip ci]")
+
     # -- lease (driver.json) ----------------------------------------------
 
     def read_lease(self) -> dict | None:
