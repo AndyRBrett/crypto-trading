@@ -31,7 +31,7 @@
   header .updated { color: var(--muted); font-size: 12px; }
   main { padding: 24px; max-width: 1100px; margin: 0 auto; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; margin-bottom: 24px; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
   .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
   .card .value { font-size: 22px; font-weight: 600; margin-top: 4px; }
   .pos { color: var(--green); } .neg { color: var(--red); }
@@ -59,6 +59,15 @@
   .chip.active { background: var(--accent); border-color: var(--accent); color: #06223f; font-weight: 600; }
   .strategy-note { color: var(--muted); font-size: 12px; line-height: 1.55; margin: 10px 0 18px; max-width: 760px; }
   .strategy-note strong { color: var(--text); font-weight: 600; }
+  .info-btn { position: absolute; top: 8px; right: 8px; width: 17px; height: 17px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--muted); font: italic 600 11px/1 Georgia, "Times New Roman", serif; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+  .info-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .info-btn.inline { position: static; width: 15px; height: 15px; margin-left: 5px; vertical-align: middle; font-size: 10px; }
+  #info-pop { position: fixed; left: 0; top: 0; z-index: 200; max-width: 280px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.5); font-size: 12px; line-height: 1.5; visibility: hidden; opacity: 0; transition: opacity .12s ease; }
+  #info-pop.open { visibility: visible; opacity: 1; }
+  #info-pop h4 { margin: 0 0 6px; font-size: 13px; color: var(--text); }
+  #info-pop p { margin: 0; color: var(--muted); }
+  #info-pop .eg { margin-top: 8px; color: var(--text); }
+  #info-pop .eg b { color: var(--accent); font-weight: 600; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 8px; }
   .legend span::before { content: "—"; font-weight: 700; margin-right: 4px; }
   #notif-btn { background: none; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 4px 10px; }
@@ -114,33 +123,36 @@
   <div class="filter" id="filter"></div>
 
   <section>
-    <h2 id="chartTitle">Equity curve</h2>
+    <h2><span id="chartTitle">Equity curve</span><button class="info-btn inline" data-info="chart" aria-label="What does this mean?">i</button></h2>
     <div class="chart-head" id="chartHead"></div>
     <canvas id="chart" width="1040" height="220"></canvas>
     <div class="legend" id="legend"></div>
   </section>
 
   <section>
-    <h2>Positions</h2>
+    <h2>Positions<button class="info-btn inline" data-info="positions" aria-label="What does this mean?">i</button></h2>
     <div id="positions"></div>
   </section>
 
   <section>
-    <h2>Latest signals</h2>
+    <h2>Latest signals<button class="info-btn inline" data-info="signals" aria-label="What does this mean?">i</button></h2>
     <div id="signals"></div>
   </section>
 
   <section>
-    <h2>Activity log</h2>
+    <h2>Activity log<button class="info-btn inline" data-info="activity" aria-label="What does this mean?">i</button></h2>
     <p class="hint">Every check the bot makes is recorded here — including HOLDs. If this list is growing, the bot is alive and watching the market.</p>
     <div id="activity"></div>
   </section>
 
   <section>
-    <h2>Trade log &amp; explanations</h2>
+    <h2>Trade log &amp; explanations<button class="info-btn inline" data-info="trades" aria-label="What does this mean?">i</button></h2>
     <div id="trades"></div>
   </section>
 </main>
+
+<!-- Shared popover for the ⓘ widget-help icons -->
+<div id="info-pop"></div>
 
 <script>
 const fmtUSD = (n) => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -154,18 +166,18 @@ const ago = (ts) => {
   return Math.floor(s / 86400) + "d ago";
 };
 
-function card(label, value, klass = "") {
-  return `<div class="card"><div class="label">${label}</div><div class="value ${klass}">${value}</div></div>`;
+function card(label, value, klass = "", info = "") {
+  return `<div class="card">${info ? infoIcon(info) : ""}<div class="label">${label}</div><div class="value ${klass}">${value}</div></div>`;
 }
 
 function renderCards(s) {
   document.getElementById("cards").innerHTML = [
-    card("Equity", fmtUSD(s.equity)),
-    card("Total return", (s.total_return_pct >= 0 ? "+" : "") + s.total_return_pct.toFixed(2) + "%", cls(s.total_return_pct)),
-    card("Cash", fmtUSD(s.cash)),
-    card("Market value", fmtUSD(s.market_value)),
-    card("Realized P&L", fmtUSD(s.realized_pnl), cls(s.realized_pnl)),
-    card("Unrealized P&L", fmtUSD(s.unrealized_pnl), cls(s.unrealized_pnl)),
+    card("Equity", fmtUSD(s.equity), "", "equity"),
+    card("Total return", (s.total_return_pct >= 0 ? "+" : "") + s.total_return_pct.toFixed(2) + "%", cls(s.total_return_pct), "total_return"),
+    card("Cash", fmtUSD(s.cash), "", "cash"),
+    card("Market value", fmtUSD(s.market_value), "", "market_value"),
+    card("Realized P&L", fmtUSD(s.realized_pnl), cls(s.realized_pnl), "realized_pnl"),
+    card("Unrealized P&L", fmtUSD(s.unrealized_pnl), cls(s.unrealized_pnl), "unrealized_pnl"),
   ].join("");
 }
 
@@ -189,7 +201,7 @@ function renderSignals(s) {
   const entries = Object.entries(s.latest_signals || {}).filter(([pid]) => coinMatch(pid));
   if (!entries.length) { el.innerHTML = '<div class="empty">No signals yet.</div>'; return; }
   el.innerHTML = `<table><thead><tr>
-      <th>Market</th><th>Signal</th><th>Price</th><th>Fast MA</th><th>Slow MA</th><th>Trend MA</th><th>RSI</th><th>ADX</th><th>Sentiment</th><th>Why</th>
+      <th>Market</th><th>Signal${infoIcon("signal", true)}</th><th>Price</th><th>Fast MA${infoIcon("fast_ma", true)}</th><th>Slow MA${infoIcon("slow_ma", true)}</th><th>Trend MA${infoIcon("trend_ma", true)}</th><th>RSI${infoIcon("rsi", true)}</th><th>ADX${infoIcon("adx", true)}</th><th>Sentiment${infoIcon("sentiment", true)}</th><th>Why</th>
     </tr></thead><tbody>` + entries.map(([pid, sig]) => {
       const ind = sig.indicators || {};
       const sent = sig.sentiment
@@ -584,6 +596,68 @@ function renderAll(s) {
   renderCards(s); renderFilter(s); renderMainChart(s);
   renderPositions(s); renderSignals(s); renderActivity(s); renderTrades(s);
 }
+
+// --- Widget help popovers --------------------------------------------------
+// A single shared popover explains each metric/indicator. Icons render inline
+// via infoIcon() and are handled by event delegation, so they keep working
+// across the 5-second re-renders without rebinding.
+const INFO = {
+  equity: { title: "Equity", body: "Everything the account is worth right now — cash plus the live value of any coins it holds.", eg: "Began at $10,000, now shows <b>$10,400</b>." },
+  total_return: { title: "Total return", body: "Percent change versus your starting cash — the overall scoreboard.", eg: "+$400 on a $10,000 start → <b>+4.00%</b>." },
+  cash: { title: "Cash", body: "Uninvested dollars sitting idle, ready to buy the next signal.", eg: "$6,000 held in coins, <b>$4,000</b> cash free." },
+  market_value: { title: "Market value", body: "Worth of the coins currently held — cash not included.", eg: "0.1 BTC at $60,000 → <b>$6,000</b>." },
+  realized_pnl: { title: "Realized P&L", body: "Profit or loss you've locked in by actually selling.", eg: "Bought at $100, sold at $120 → <b>+$20</b>." },
+  unrealized_pnl: { title: "Unrealized P&L", body: "Paper profit or loss on coins still held; it moves with the price until you sell.", eg: "Bought at $100, now $110 → <b>+$10</b> on paper." },
+  signal: { title: "Signal", body: "The bot's decision this tick — BUY, SELL, or HOLD.", eg: "<b>BUY</b> when trend, momentum, and RSI all line up." },
+  fast_ma: { title: "Fast MA", body: "Fast Moving Average — average price over a short window (e.g. 20 candles). Reacts quickly to new moves.", eg: "Recent prices average <b>$61,200</b>." },
+  slow_ma: { title: "Slow MA", body: "Slow Moving Average — average over a longer window (e.g. 50 candles). Smoother and slower.", eg: "Longer average sits at <b>$60,500</b>." },
+  trend_ma: { title: "Trend MA", body: "A very long average (e.g. 200) marking the big-picture trend direction.", eg: "Price above <b>$58,000</b> = overall uptrend." },
+  rsi: { title: "RSI", body: "Relative Strength Index (0–100) — how overbought or oversold the market is.", eg: "<b>Below 30</b> = oversold, <b>above 70</b> = overbought." },
+  adx: { title: "ADX", body: "Average Directional Index (0–100) — how strong the trend is, regardless of direction.", eg: "<b>12</b> = choppy, sit out; <b>35</b> = strong trend." },
+  sentiment: { title: "Sentiment", body: "Optional news-mood score. Negative news can veto a buy or trigger a risk-off sell.", eg: "<b>Negative (−0.6)</b> → skip an otherwise-valid buy." },
+  chart: { title: "Main chart", body: "With “All” selected this is your equity (account value) over time — the dashed line marks where you started. Pick a coin to switch it to that coin's 1-hour price candles with the moving averages drawn on top." },
+  positions: { title: "Positions", body: "Coins the account holds right now, with their live value and paper (unrealized) profit or loss." },
+  signals: { title: "Latest signals", body: "The newest reading and decision for each market the bot watches. Tap the ⓘ on any column to learn what that indicator means." },
+  activity: { title: "Activity log", body: "Every check the bot makes — including HOLDs — so you can see it's alive and watching the market." },
+  trades: { title: "Trade log", body: "Each completed buy and sell with a plain-English reason. The meta line shows the indicators at that moment, including ATR — the volatility measure used to size the trade and place its stop-loss." },
+};
+
+function infoIcon(key, inline) {
+  return `<button class="info-btn${inline ? " inline" : ""}" data-info="${key}" aria-label="What does this mean?">i</button>`;
+}
+
+(function setupInfoPop() {
+  const pop = document.getElementById("info-pop");
+  if (!pop) return;
+  const close = () => { pop.classList.remove("open"); pop.dataset.key = ""; };
+  function open(btn) {
+    const d = INFO[btn.dataset.info];
+    if (!d) return;
+    pop.innerHTML = `<h4>${d.title}</h4><p>${d.body}</p>` + (d.eg ? `<div class="eg">e.g. ${d.eg}</div>` : "");
+    const r = btn.getBoundingClientRect();
+    const pad = 8, pw = pop.offsetWidth, ph = pop.offsetHeight;
+    let left = Math.max(pad, Math.min(r.right - pw, window.innerWidth - pad - pw));
+    let top = r.bottom + 6;
+    if (top + ph > window.innerHeight - pad) top = r.top - ph - 6;  // flip above if needed
+    top = Math.max(pad, top);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    pop.classList.add("open");
+    pop.dataset.key = btn.dataset.info;
+  }
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".info-btn");
+    if (btn) {
+      e.preventDefault(); e.stopPropagation();
+      (pop.classList.contains("open") && pop.dataset.key === btn.dataset.info) ? close() : open(btn);
+      return;
+    }
+    if (!e.target.closest("#info-pop")) close();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  window.addEventListener("resize", close);
+  window.addEventListener("scroll", close, true);
+})();
 
 async function refresh() {
   try {
