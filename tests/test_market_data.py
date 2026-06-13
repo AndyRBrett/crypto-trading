@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from bot.config import Config
-from bot.market_data import MarketData, MarketDataError, _symbol
+from bot.market_data import MarketData, MarketDataError, _symbol, closed_candles
 
 
 # ---------------------------------------------------------------------------
@@ -102,3 +102,41 @@ def test_get_prices_returns_dict():
     ]
     prices = md.get_prices(["BTC-USD", "ETH-USD"])
     assert prices == {"BTC-USD": 46000.0, "ETH-USD": 3200.0}
+
+
+# ---------------------------------------------------------------------------
+# closed_candles — drop the still-forming final bar
+# ---------------------------------------------------------------------------
+
+def _hourly(n: int, start: int = 1_700_000_000) -> list[dict]:
+    return [
+        {"time": start + i * 3600, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0}
+        for i in range(n)
+    ]
+
+
+def test_closed_candles_drops_forming_bar():
+    candles = _hourly(5)
+    last_open = candles[-1]["time"]
+    # "now" is 10 min into the last hourly candle -> it is still forming.
+    result = closed_candles(candles, "ONE_HOUR", now=last_open + 600)
+    assert len(result) == 4
+    assert result[-1] is candles[-2]
+
+
+def test_closed_candles_keeps_settled_bar():
+    candles = _hourly(5)
+    last_open = candles[-1]["time"]
+    # "now" is past the end of the last candle's hour -> it has closed.
+    result = closed_candles(candles, "ONE_HOUR", now=last_open + 3601)
+    assert len(result) == 5
+
+
+def test_closed_candles_unknown_granularity_is_noop():
+    candles = _hourly(3)
+    assert len(closed_candles(candles, "NOPE", now=candles[-1]["time"])) == 3
+
+
+def test_closed_candles_short_series_unchanged():
+    candles = _hourly(1)
+    assert closed_candles(candles, "ONE_HOUR", now=candles[-1]["time"]) == candles

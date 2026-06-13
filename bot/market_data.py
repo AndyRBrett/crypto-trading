@@ -27,6 +27,50 @@ _TIMEFRAMES: dict[str, str] = {
     "ONE_DAY": "1d",
 }
 
+# Length of each granularity in seconds, used to tell whether the most recent
+# candle has closed yet (see ``closed_candles``).
+_GRANULARITY_SECONDS: dict[str, int] = {
+    "ONE_MINUTE": 60,
+    "FIVE_MINUTE": 5 * 60,
+    "FIFTEEN_MINUTE": 15 * 60,
+    "THIRTY_MINUTE": 30 * 60,
+    "ONE_HOUR": 60 * 60,
+    "TWO_HOUR": 2 * 60 * 60,
+    "SIX_HOUR": 6 * 60 * 60,
+    "ONE_DAY": 24 * 60 * 60,
+}
+
+
+def closed_candles(
+    candles: Sequence[dict], granularity: str, now: float | None = None
+) -> list[dict]:
+    """Return ``candles`` with the still-forming final bar dropped.
+
+    Exchanges return the current, in-progress period as the most recent candle.
+    When the bot ticks more often than the candle granularity (e.g. every 15 min
+    on hourly candles), that last bar is a moving target: signals derived from it
+    flip-flop and the same crossover gets re-detected on every tick. Strategy
+    entries should only ever look at *settled* candles, so drop the final bar
+    while it is still inside its own period. Protective stops still react to the
+    live price separately, which is the whole point of ticking intra-candle.
+    """
+    import time as _time
+
+    candles = list(candles)
+    if len(candles) < 2:
+        return candles
+    span = _GRANULARITY_SECONDS.get(granularity)
+    if not span:
+        return candles
+    now = _time.time() if now is None else now
+    last_open = candles[-1].get("time")
+    if last_open is None:
+        return candles
+    # If we're still inside the last candle's period, it hasn't closed yet.
+    if now < last_open + span:
+        return candles[:-1]
+    return candles
+
 # Module-level cache so load_markets() is called once per (exchange, auth) pair.
 _exchange_cache: dict[tuple, ccxt.Exchange] = {}
 
