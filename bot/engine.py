@@ -17,7 +17,7 @@ import time
 from .config import Config
 from .coordinate import Coordinator
 from .explain import Explainer
-from .market_data import MarketData
+from .market_data import MarketData, closed_candles
 from .notifier import Notifier
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
 from .publish import Publisher
@@ -120,10 +120,18 @@ class Engine:
                 except Exception as exc:
                     log.warning("sentiment analyze failed for %s: %s", product_id, exc)
 
+            # Entries are evaluated only on *settled* candles: the exchange's
+            # most recent bar is the still-forming current period, and ticking
+            # every 15 min on hourly candles would otherwise re-detect the same
+            # crossover on every tick off a moving target. Protective exits below
+            # still use the live price, so stops react intra-candle as intended.
+            signal_candles = closed_candles(candles, self.config.candle_granularity)
             signal = self.strategy.generate_signal(
-                product_id, candles, sentiment=sentiment
+                product_id, signal_candles, sentiment=sentiment
             )
-            price = signal.price
+            # Live price (the forming bar's latest close) drives sizing,
+            # execution, equity, and the protective stops.
+            price = float(candles[-1]["close"])
             prices[product_id] = price
             self.latest_signals[product_id] = {
                 "action": signal.action,
