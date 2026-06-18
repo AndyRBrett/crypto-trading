@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         # Also sanity-check public data.
         product = config.accounts[0].products[0] if config.accounts else config.products[0]
         try:
-            price = md._public_price(product)
+            price = md.get_price(product)
             print(f"Public price for {product}: ${price:,.2f}")
         except Exception as exc:
             print(f"Public price check failed: {exc}")

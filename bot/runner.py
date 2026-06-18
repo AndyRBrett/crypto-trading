@@ -59,7 +59,7 @@ class CachedMarketData:
         return self.inner.verify_credentials()
 
     def _public_price(self, product_id):  # used by `main verify`
-        return self.inner._public_price(product_id)
+        return self.inner.get_price(product_id)
 
 
 class Runner:
