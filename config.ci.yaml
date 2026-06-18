@@ -5,7 +5,12 @@
 # Secrets (ANTHROPIC_API_KEY, the GitHub token) come from Actions secrets/env,
 # never from this file. Your local config.yaml stays separate and gitignored.
 
-# 300 candles so the 200-period trend filter has enough history.
+# Trade on the DAILY timeframe. Backtests over multiple years show simple TA only
+# clears trading fees on daily candles — hourly trades ~5x more often and bleeds
+# the (small) edge to fees. Entries fire on settled daily bars; the bot still
+# polls hourly so protective stops react to price intraday.
+candle_granularity: ONE_DAY
+# 300 candles so the 200-period trend filter has enough history (~10 months daily).
 candle_count: 300
 
 # Shared strategy defaults. Each account below inherits these and overrides as
@@ -15,7 +20,7 @@ strategy:
   slow_period: 50
   ma_type: ema
   rsi_period: 14
-  rsi_overbought: 70
+  rsi_overbought: 85   # 70 over-blocks entries in trends (daily sweep favors 85+)
   rsi_oversold: 30
   trend_filter: true
   trend_period: 200
@@ -53,7 +58,7 @@ risk_per_trade_pct: 0.01
 max_position_pct: 0.30
 max_open_positions: 3
 stop_loss_atr_mult: 2.0
-take_profit_atr_mult: 4.0
+take_profit_atr_mult: 6.0   # 3:1 reward:risk; daily sweep favors wider targets
 trailing_stop: true
 fallback_stop_pct: 0.08
 

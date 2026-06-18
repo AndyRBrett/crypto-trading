@@ -10,12 +10,14 @@ starting_cash: 10000        # virtual USD to start with
 fee_rate: 0.006             # simulated taker fee (0.6%)
 buy_fraction: 0.25          # fallback sizing only (used when ATR is unavailable)
 
-# Cadence. Check every 15 min so stop-losses react fast intraday, while entries
-# are still evaluated on hourly candles (candle_granularity below).
-poll_interval: 900          # seconds between decision cycles
+# Cadence. Entries are evaluated on settled DAILY candles; polling more often
+# than that just lets the protective stops react to price intraday.
+poll_interval: 3600         # seconds between decision cycles (hourly stop checks)
 
-# Market data. 300 candles so the 200-period trend filter has enough history.
-candle_granularity: ONE_HOUR   # ONE_MINUTE / FIVE_MINUTE / FIFTEEN_MINUTE / ONE_HOUR / SIX_HOUR / ONE_DAY
+# Market data. Backtests show simple TA only clears trading fees on the DAILY
+# timeframe — hourly trades too often and bleeds the edge to fees. 300 candles
+# so the 200-period trend filter has enough history (~10 months of daily bars).
+candle_granularity: ONE_DAY    # ONE_MINUTE / FIVE_MINUTE / FIFTEEN_MINUTE / ONE_HOUR / SIX_HOUR / ONE_DAY
 candle_count: 300
 exchange: coinbase             # any CCXT exchange id: coinbase, kraken, binance, bybit, ...
 data_source: public            # kept for backward compat; "public" (no keys) or "coinbase_advanced" (uses your keys)
@@ -31,7 +33,8 @@ strategy:
                                 # missing trends when the bot isn't ticking on the
                                 # crossover candle. Set false for strict edge-only entries.
   rsi_period: 14
-  rsi_overbought: 70
+  rsi_overbought: 85            # 70 over-blocks entries in trends; the daily sweep
+                               # favors 85+ (a strong uptrend pins RSI high)
   rsi_oversold: 30
   trend_filter: true            # only go long while price is above the trend MA
   trend_period: 200
@@ -88,7 +91,7 @@ risk_per_trade_pct: 0.01     # risk ~1% of equity per trade (sized off the stop)
 max_position_pct: 0.30       # cap any single position at 30% of equity
 max_open_positions: 3        # max concurrent positions (portfolio heat)
 stop_loss_atr_mult: 2.0      # initial stop = entry - 2 * ATR
-take_profit_atr_mult: 4.0    # target = entry + 4 * ATR (2:1 reward:risk)
+take_profit_atr_mult: 6.0    # target = entry + 6 * ATR (3:1 reward:risk; daily sweep favors this)
 trailing_stop: true          # ride winners with a Chandelier trailing stop
 fallback_stop_pct: 0.08      # stop distance when ATR isn't available
 
