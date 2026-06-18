@@ -67,13 +67,18 @@ def run_backtest(
     portfolio = Portfolio(config.starting_cash, config.fee_rate)
     strategy_type = type(strategy).__name__
     min_c = strategy.min_candles()
+    # Bound the per-bar history window to what the LIVE engine actually sees
+    # (config.candle_count). This matches production (live fetches ~300 candles,
+    # not full history) and turns the inner loop from O(n^2) into O(n*cap) — the
+    # difference between a multi-minute sweep and a few seconds.
+    window_cap = max(min_c, int(getattr(config, "candle_count", 300) or 300))
 
     peak_equity = config.starting_cash
     max_dd = 0.0
 
     candles = list(candles)
     for i in range(min_c, len(candles)):
-        window = candles[: i + 1]            # settled history through bar i
+        window = candles[max(0, i + 1 - window_cap): i + 1]  # bounded history
         bar = candles[i]
         price = float(bar["close"])
         ts = bar.get("time", i)

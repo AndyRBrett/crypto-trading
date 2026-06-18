@@ -14,8 +14,10 @@ column, not the in-sample ranking.
 from __future__ import annotations
 
 import dataclasses
+import os
 from dataclasses import dataclass
 from itertools import product
+from multiprocessing import Pool
 from typing import Sequence
 
 from .backtest import BacktestResult, run_backtest
@@ -96,6 +98,34 @@ def _apply(base_config, params: dict):
     return cfg, scfg
 
 
+# Per-worker shared state (set once per process to avoid re-pickling the candle
+# series for every combo). Holds (strategy_type, train, test, base_config, product_id).
+_JOB: tuple = ()
+
+
+def _init_worker(job: tuple) -> None:
+    global _JOB
+    _JOB = job
+
+
+def _run_combo(params: dict) -> "SweepRun | None":
+    strategy_type, train, test, base_config, product_id = _JOB
+    cfg, scfg = _apply(base_config, params)
+    strat = make_strategy(strategy_type, scfg)
+    if len(train) <= strat.min_candles():
+        return None
+    in_sample = run_backtest(strat, train, cfg, product_id)
+    holdout_res = None
+    if test is not None:
+        # Prepend warmup bars so the strategy is "spun up" entering the test
+        # window — trades then happen only in the held-out region.
+        warm = train[-strat.min_candles():]
+        window = warm + test
+        if len(window) > strat.min_candles():
+            holdout_res = run_backtest(strat, window, cfg, product_id)
+    return SweepRun(params, in_sample, holdout_res)
+
+
 def sweep(
     strategy_type: str,
     candles: Sequence[dict],
@@ -103,10 +133,12 @@ def sweep(
     grid: dict[str, list] | None = None,
     product_id: str = "BTC-USD",
     holdout: float = 0.0,
+    progress=None,
 ) -> list[SweepRun]:
     """Backtest every combination in ``grid``; return runs sorted by in-sample net return.
 
     ``holdout`` (0..1): fraction of the series held out for out-of-sample scoring.
+    ``progress``: optional callable(done, total) invoked per combo for UI feedback.
     """
     grid = grid if grid is not None else DEFAULT_GRIDS.get(strategy_type)
     if not grid:
@@ -121,25 +153,35 @@ def sweep(
         train, test = candles, None
 
     keys = list(grid)
+    combos = [
+        params
+        for combo in product(*(grid[k] for k in keys))
+        if not _invalid(params := dict(zip(keys, combo)))
+    ]
+    total = len(combos)
+
+    job = (strategy_type, train, test, base_config, product_id)
     runs: list[SweepRun] = []
-    for combo in product(*(grid[k] for k in keys)):
-        params = dict(zip(keys, combo))
-        if _invalid(params):
-            continue
-        cfg, scfg = _apply(base_config, params)
-        strat = make_strategy(strategy_type, scfg)
-        if len(train) <= strat.min_candles():
-            continue
-        in_sample = run_backtest(strat, train, cfg, product_id)
-        holdout_res = None
-        if test is not None:
-            # Prepend warmup bars so the strategy is "spun up" entering the test
-            # window — trades then happen only in the held-out region.
-            warm = train[-strat.min_candles():]
-            window = warm + test
-            if len(window) > strat.min_candles():
-                holdout_res = run_backtest(strat, window, cfg, product_id)
-        runs.append(SweepRun(params, in_sample, holdout_res))
+
+    # Combos are independent, and each is hundreds of pure-Python backtests, so
+    # fan them out across cores. Serial for small grids (pool overhead isn't
+    # worth it, and it keeps tests simple).
+    workers = min(os.cpu_count() or 1, 8)
+    if workers > 1 and total > 16:
+        with Pool(workers, initializer=_init_worker, initargs=(job,)) as pool:
+            for done, res in enumerate(pool.imap_unordered(_run_combo, combos, chunksize=4), 1):
+                if progress is not None:
+                    progress(done, total)
+                if res is not None:
+                    runs.append(res)
+    else:
+        _init_worker(job)
+        for done, params in enumerate(combos, 1):
+            if progress is not None:
+                progress(done, total)
+            res = _run_combo(params)
+            if res is not None:
+                runs.append(res)
 
     runs.sort(key=lambda r: r.in_sample.total_return_pct, reverse=True)
     return runs

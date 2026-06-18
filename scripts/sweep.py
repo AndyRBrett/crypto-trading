@@ -85,8 +85,12 @@ def main(argv=None) -> int:
         f"axes: " + "  ".join(f"{k}={v}" for k, v in grid.items()) + "\n" + "-" * 100
     )
 
+    def _progress(done, total):
+        print(f"\r  scanning {done}/{total} combos…", end="", file=sys.stderr, flush=True)
+
     runs = sweep(args.strategy, candles, config, grid=grid,
-                 product_id=args.product, holdout=args.holdout)
+                 product_id=args.product, holdout=args.holdout, progress=_progress)
+    print("", file=sys.stderr)  # newline after the progress line
     if not runs:
         print("No valid combinations ran (check candle count vs. min_candles).")
         return 1
