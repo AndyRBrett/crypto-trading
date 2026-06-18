@@ -67,10 +67,10 @@ def main(argv=None) -> int:
         parser.error(f"no grid for strategy {args.strategy!r}; supply --param axes")
 
     granularity = args.granularity or config.candle_granularity
-    count = args.count or config.candle_count
+    count = args.count or max(config.candle_count, 2000)
     market = MarketData(config)
     try:
-        candles = market.get_candles(args.product, granularity=granularity, count=count)
+        candles = market.get_history(args.product, granularity=granularity, count=count)
     except Exception as exc:  # pragma: no cover - network/exchange errors
         print(f"fetch failed for {args.product}: {exc}", file=sys.stderr)
         return 1

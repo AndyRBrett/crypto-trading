@@ -65,7 +65,7 @@ def main(argv=None) -> int:
 
     config = Config.load(args.config)
     granularity = args.granularity or config.candle_granularity
-    count = args.count or config.candle_count
+    count = args.count or max(config.candle_count, 2000)
     market = MarketData(config)
 
     eff_fee = args.fee if args.fee is not None else config.fee_rate
@@ -81,7 +81,7 @@ def main(argv=None) -> int:
         strategy = make_strategy(cfg.strategy_type, cfg.strategy)
         for product in cfg.products:
             try:
-                candles = market.get_candles(product, granularity=granularity, count=count)
+                candles = market.get_history(product, granularity=granularity, count=count)
             except Exception as exc:  # pragma: no cover - network/exchange errors
                 print(f"  [{acct.name}] {product}: fetch failed: {exc}", file=sys.stderr)
                 continue

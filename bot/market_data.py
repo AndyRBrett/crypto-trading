@@ -134,6 +134,59 @@ class MarketData:
         candles.sort(key=lambda c: c["time"])
         return candles[-count:]
 
+    def get_history(
+        self, product_id: str, granularity: str | None = None, count: int = 2000
+    ) -> list[dict]:
+        """Fetch up to ``count`` candles by paginating backward in time.
+
+        Exchanges cap ``fetch_ohlcv`` at a few hundred candles per request
+        (Coinbase ≈ 300), so a single call can't supply enough history for a
+        meaningful backtest. This walks forward from ``now - count*timeframe`` in
+        pages until it has enough (or the exchange runs out), de-duplicating on
+        timestamp. Used by the backtester/sweep; live trading uses get_candles.
+        """
+        granularity = granularity or self.config.candle_granularity
+        timeframe = _TIMEFRAMES.get(granularity, "1h")
+        symbol = _symbol(product_id)
+        ex = self._exchange()
+        try:
+            tf_ms = ex.parse_timeframe(timeframe) * 1000
+        except Exception:
+            tf_ms = _GRANULARITY_SECONDS.get(granularity, 3600) * 1000
+        now_ms = ex.milliseconds()
+        since = now_ms - count * tf_ms
+
+        by_time: dict[int, list] = {}
+        max_pages = count // 200 + 5  # safety bound on request count
+        for _ in range(max_pages):
+            try:
+                batch = ex.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=300)
+            except ccxt.BaseError as exc:
+                raise MarketDataError(f"fetch_ohlcv failed for {symbol}: {exc}") from exc
+            if not batch:
+                break
+            for row in batch:
+                by_time[int(row[0])] = row
+            last_ts = int(batch[-1][0])
+            next_since = last_ts + tf_ms
+            if next_since <= since or next_since >= now_ms or len(by_time) >= count:
+                break
+            since = next_since
+
+        candles = [
+            {
+                "time": ts // 1000,
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": float(row[5]),
+            }
+            for ts, row in by_time.items()
+        ]
+        candles.sort(key=lambda c: c["time"])
+        return candles[-count:]
+
     def get_price(self, product_id: str) -> float:
         """Latest price from the exchange ticker, falling back to the last candle close."""
         symbol = _symbol(product_id)

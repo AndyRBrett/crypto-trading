@@ -73,6 +73,56 @@ def test_get_candles_raises_on_ccxt_error():
 
 
 # ---------------------------------------------------------------------------
+# get_history — paginated backtest fetch
+# ---------------------------------------------------------------------------
+
+def test_get_history_paginates_past_per_request_cap():
+    md, mock_ex = _make_md()
+    tf_ms = 3_600_000
+    # Simulate a finite history of 1000 hourly bars ending "now". Each call
+    # returns up to 300 bars starting at `since` (the per-request cap).
+    base = 1_700_000_000_000
+    full = [
+        [base + i * tf_ms, 1.0 + i, 1.0 + i, 1.0 + i, 1.0 + i, 1.0]
+        for i in range(1000)
+    ]
+    mock_ex.parse_timeframe.return_value = 3600
+    mock_ex.milliseconds.return_value = full[-1][0] + tf_ms
+
+    def fake_fetch(symbol, timeframe=None, since=None, limit=None):
+        rows = [r for r in full if r[0] >= (since or 0)]
+        return rows[: (limit or 300)]
+
+    mock_ex.fetch_ohlcv.side_effect = fake_fetch
+
+    candles = md.get_history("BTC-USD", granularity="ONE_HOUR", count=900)
+    # Must have looped (>1 request) and gathered far more than one 300-cap page.
+    assert mock_ex.fetch_ohlcv.call_count > 1
+    assert len(candles) == 900
+    # De-duplicated and sorted oldest→newest.
+    times = [c["time"] for c in candles]
+    assert times == sorted(times)
+    assert len(set(times)) == len(times)
+
+
+def test_get_history_handles_short_history():
+    md, mock_ex = _make_md()
+    tf_ms = 3_600_000
+    base = 1_700_000_000_000
+    full = [[base + i * tf_ms, 1.0, 1.0, 1.0, 1.0, 1.0] for i in range(50)]
+    mock_ex.parse_timeframe.return_value = 3600
+    mock_ex.milliseconds.return_value = full[-1][0] + tf_ms
+
+    def fake_fetch(symbol, timeframe=None, since=None, limit=None):
+        rows = [r for r in full if r[0] >= (since or 0)]
+        return rows[: (limit or 300)]
+
+    mock_ex.fetch_ohlcv.side_effect = fake_fetch
+    candles = md.get_history("BTC-USD", granularity="ONE_HOUR", count=2000)
+    assert len(candles) == 50  # all available, no infinite loop
+
+
+# ---------------------------------------------------------------------------
 # get_price
 # ---------------------------------------------------------------------------
 
