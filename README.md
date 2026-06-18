@@ -263,6 +263,23 @@ Per-account `strategy:` overrides merge over the top-level strategy defaults, an
 risk controls are inherited unless overridden per account. See
 `config.example.yaml` for the fully commented version.
 
+## Backtesting
+
+Before shipping a strategy or parameter change to live paper trading, measure it
+on historical candles. The backtester replays each configured account/strategy
+through the *same* risk layer (`bot/risk.py`) and paper portfolio the live engine
+uses, so results — return, max drawdown, win-rate, profit factor — are net of fees
+and reflect what the bot would actually have done:
+
+```bash
+python -m scripts.backtest                       # uses config.yaml
+python -m scripts.backtest --count 1000          # more history
+python -m scripts.backtest --granularity ONE_DAY # different timeframe
+```
+
+Each row reports one strategy on one product. Use it to compare changes head-to-head
+instead of waiting weeks for live signal to accrue.
+
 ## Testing
 
 ```bash

@@ -21,6 +21,7 @@ from .market_data import MarketData, closed_candles
 from .notifier import Notifier
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
 from .publish import Publisher
+from . import risk
 from .sentiment import SentimentAnalyzer
 from .storage import Storage
 from .strategies import make_strategy
@@ -54,6 +55,11 @@ class Engine:
         self.analyzer = sentiment_analyzer
         if self.analyzer is None and config.sentiment_enabled:
             self.analyzer = SentimentAnalyzer(config)
+            if not config.anthropic_api_key:
+                log.warning(
+                    "sentiment_enabled is set but ANTHROPIC_API_KEY is missing — "
+                    "every sentiment score will be a neutral 0.0 until a key is provided."
+                )
         self.publisher = publisher or Publisher(config)
         self.notifier = Notifier(config.push_subscription, config.vapid_private_key, config.vapid_claims_email)
 
@@ -117,6 +123,17 @@ class Engine:
             if self.analyzer is not None:
                 try:
                     sentiment = self.analyzer.analyze(product_id)
+                    # Surface *why* the score is what it is — a 0.0 can mean
+                    # "no key", "no relevant headlines", or a genuine neutral read,
+                    # and the summary distinguishes them.
+                    log.info(
+                        "%s sentiment: %+.2f (%s, %d headlines) — %s",
+                        product_id,
+                        sentiment.score,
+                        sentiment.label,
+                        sentiment.headline_count,
+                        sentiment.summary,
+                    )
                 except Exception as exc:
                     log.warning("sentiment analyze failed for %s: %s", product_id, exc)
 
@@ -222,53 +239,17 @@ class Engine:
 
     def _protective_exit(self, product_id, pos, price, atr, candles):
         """Return an exit reason if a stop/target/trailing level is breached."""
-        cfg = self.config
-        entry = pos.avg_price
-        if atr and atr > 0:
-            stop = entry - cfg.stop_loss_atr_mult * atr
-            target = entry + cfg.take_profit_atr_mult * atr
-            if cfg.trailing_stop:
-                opened = self.portfolio.opened_at(product_id)
-                highs = [
-                    c["high"] for c in candles
-                    if "high" in c and (opened is None or c.get("time", 0) >= opened)
-                ]
-                if highs:
-                    stop = max(stop, max(highs) - cfg.stop_loss_atr_mult * atr)
-        else:
-            stop = entry * (1 - cfg.fallback_stop_pct)
-            target = None
-
-        if price <= stop:
-            return (
-                f"Stop-loss: price ${price:,.2f} hit stop ${stop:,.2f} "
-                f"(entry ${entry:,.2f}) — cutting the loss / locking in gains."
-            )
-        if target is not None and price >= target:
-            return (
-                f"Take-profit: price ${price:,.2f} reached target ${target:,.2f} "
-                f"(entry ${entry:,.2f})."
-            )
-        return None
+        opened = self.portfolio.opened_at(product_id)
+        highs = [
+            c["high"] for c in candles
+            if "high" in c and (opened is None or c.get("time", 0) >= opened)
+        ]
+        return risk.protective_exit_reason(self.config, pos.avg_price, price, atr, highs)
 
     def _position_size(self, price, atr, prices):
         """Volatility-based size so the stop distance risks ~risk_per_trade_pct."""
-        cfg = self.config
-        if price <= 0:
-            return 0.0
         equity = self.portfolio.cash + self.portfolio.market_value(prices)
-        if equity <= 0:
-            return 0.0
-        stop_dist = cfg.stop_loss_atr_mult * atr if (atr and atr > 0) else price * cfg.fallback_stop_pct
-        if stop_dist <= 0:
-            return 0.0
-        qty_by_risk = (equity * cfg.risk_per_trade_pct) / stop_dist
-        qty_by_cap = (equity * cfg.max_position_pct) / price
-        qty_by_cash = (self.portfolio.cash * 0.999) / (price * (1 + cfg.fee_rate))
-        qty = min(qty_by_risk, qty_by_cap, qty_by_cash)
-        if qty * price < 10:  # ignore dust trades
-            return 0.0
-        return qty
+        return risk.position_size(self.config, equity, self.portfolio.cash, price, atr)
 
     def _buy(self, product_id, price, qty, reasons, indicators):
         try:

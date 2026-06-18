@@ -35,6 +35,10 @@ class Trade:
 class Position:
     quantity: float = 0.0
     avg_price: float = 0.0
+    # Buy-side fees paid to open the currently-held quantity. Kept separate from
+    # avg_price (so stops/targets still key off the clean entry price) but folded
+    # into realized/unrealized P&L so fees are never silently dropped.
+    entry_fees: float = 0.0
 
 
 class InsufficientFunds(Exception):
@@ -73,6 +77,7 @@ class Portfolio:
         for product_id, pos in self.positions.items():
             if pos.quantity > 0 and product_id in prices:
                 total += (prices[product_id] - pos.avg_price) * pos.quantity
+                total -= pos.entry_fees  # the buy-side fee already paid to open
         return total
 
     def realized_pnl(self) -> float:
@@ -128,6 +133,7 @@ class Portfolio:
             new_qty = pos.quantity + quantity
             pos.avg_price = (pos.avg_price * pos.quantity + price * quantity) / new_qty
             pos.quantity = new_qty
+            pos.entry_fees += fee
             realized = 0.0
         elif side == SELL:
             pos = self.positions.get(product_id, Position())
@@ -137,12 +143,21 @@ class Portfolio:
                 )
             proceeds = price * quantity
             fee = proceeds * self.fee_rate
-            realized = (price - pos.avg_price) * quantity - fee
+            # Attribute a proportional share of the buy-side fees to the sold
+            # quantity so realized P&L reflects the *round-trip* cost, not just
+            # the sell fee. (Without this, realized_pnl overstates profit by the
+            # entry fees and never reconciles with the cash balance.)
+            entry_fee_share = (
+                pos.entry_fees * (quantity / pos.quantity) if pos.quantity else 0.0
+            )
+            realized = (price - pos.avg_price) * quantity - fee - entry_fee_share
             self.cash += proceeds - fee
             pos.quantity -= quantity
+            pos.entry_fees -= entry_fee_share
             if pos.quantity <= 1e-9:
                 pos.quantity = 0.0
                 pos.avg_price = 0.0
+                pos.entry_fees = 0.0
         else:
             raise ValueError(f"unknown side {side!r}")
 
@@ -177,12 +192,16 @@ class Portfolio:
                     pos.avg_price * pos.quantity + t.price * t.quantity
                 ) / new_qty
                 pos.quantity = new_qty
+                pos.entry_fees += t.fee
             else:  # SELL
                 pos = p.positions.setdefault(t.product_id, Position())
                 p.cash += t.notional() - t.fee
+                if pos.quantity:
+                    pos.entry_fees -= pos.entry_fees * (t.quantity / pos.quantity)
                 pos.quantity = max(0.0, pos.quantity - t.quantity)
                 if pos.quantity <= 1e-9:
                     pos.quantity = 0.0
                     pos.avg_price = 0.0
+                    pos.entry_fees = 0.0
             p.trades.append(t)
         return p

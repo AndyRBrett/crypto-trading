@@ -26,6 +26,10 @@ strategy:
   fast_period: 20
   slow_period: 50
   ma_type: ema                  # "ema" or "sma"
+  allow_trend_reentry: true     # enter while fast MA > slow MA (filters passing),
+                                # not only on the exact crossover bar. Avoids
+                                # missing trends when the bot isn't ticking on the
+                                # crossover candle. Set false for strict edge-only entries.
   rsi_period: 14
   rsi_overbought: 70
   rsi_oversold: 30

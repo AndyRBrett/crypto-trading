@@ -33,6 +33,36 @@ def test_sell_realizes_pnl():
     assert p.cash == pytest.approx(10_200)
 
 
+def test_realized_pnl_includes_buy_side_fee():
+    # Round trip with a 1% fee on both legs. Buy 10 @ 100 (fee 10), sell 10 @ 120
+    # (fee 12). Realized P&L must net BOTH fees: 200 gross - 10 - 12 = 178.
+    p = Portfolio(starting_cash=10_000, fee_rate=0.01)
+    p.execute(BUY, "BTC-USD", price=100.0, quantity=10)
+    p.execute(SELL, "BTC-USD", price=120.0, quantity=10)
+    assert p.realized_pnl() == pytest.approx(178.0)
+    # And realized P&L must reconcile exactly with the cash-based result once flat.
+    assert p.realized_pnl() == pytest.approx(p.cash - p.starting_cash)
+
+
+def test_unrealized_pnl_reflects_buy_fee():
+    # Right after buying, the position is underwater by the entry fee even at a
+    # flat price — equity (cash + market value) must equal starting cash minus fee.
+    p = Portfolio(starting_cash=10_000, fee_rate=0.01)
+    p.execute(BUY, "BTC-USD", price=100.0, quantity=10)
+    prices = {"BTC-USD": 100.0}
+    assert p.unrealized_pnl(prices) == pytest.approx(-10.0)
+    assert p.total_equity(prices) == pytest.approx(9_990.0)
+
+
+def test_partial_sell_attributes_proportional_buy_fee():
+    p = Portfolio(starting_cash=10_000, fee_rate=0.01)
+    p.execute(BUY, "BTC-USD", price=100.0, quantity=10)  # entry fee 10
+    p.execute(SELL, "BTC-USD", price=100.0, quantity=5)  # sell fee 5, half entry fee
+    # Flat-price half exit: 0 gross - 5 sell fee - 5 (half of 10 entry fee) = -10.
+    assert p.realized_pnl() == pytest.approx(-10.0)
+    assert p.position("BTC-USD").entry_fees == pytest.approx(5.0)
+
+
 def test_average_cost_basis_on_multiple_buys():
     p = Portfolio(starting_cash=10_000, fee_rate=0.0)
     p.execute(BUY, "BTC-USD", price=100.0, quantity=10)

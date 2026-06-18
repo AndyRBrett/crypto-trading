@@ -78,6 +78,13 @@ class StrategyConfig:
     fast_period: int = 20
     slow_period: int = 50
     ma_type: str = "ema"  # "ema" (default) or "sma"
+    # Re-arm entries: enter whenever the fast MA is above the slow MA and the
+    # filters pass, not only on the exact crossover bar. A crossover is a
+    # single-bar event — if the bot isn't ticking at that instant, or a filter
+    # blocks it that once, an edge-triggered entry is missed forever. Level-based
+    # re-arming lets the entry fire on any qualifying bar while flat (the engine
+    # only buys when there's no open position), so trends aren't skipped.
+    allow_trend_reentry: bool = True
     # Momentum oscillator.
     rsi_period: int = 14
     rsi_overbought: float = 70.0
@@ -172,33 +179,48 @@ class Strategy:
         gap = abs(fast - slow) / slow if slow else 0.0
         uptrend = trend_ma is None or price > trend_ma
         trend_ok = adx_val is None or adx_val >= c.adx_min
+        # Re-arm: a level-based entry trigger (fast above slow) in addition to the
+        # edge-based crossover, so an uptrend isn't skipped just because the bot
+        # wasn't ticking on the exact crossover bar. The engine still only acts on
+        # a BUY while flat, so this re-enters trends rather than stacking.
+        reentry = c.allow_trend_reentry and fast > slow
+        entry_trigger = bullish_cross or reentry
 
         reasons: list[str] = []
         action = HOLD
         strength = 0.0
 
-        if bullish_cross and rsi_val < c.rsi_overbought and uptrend and trend_ok:
+        if entry_trigger and rsi_val < c.rsi_overbought and uptrend and trend_ok:
             action = BUY
-            reasons.append(
-                f"Fast {c.ma_type.upper()}({c.fast_period}) crossed above slow "
-                f"{c.ma_type.upper()}({c.slow_period}) ({fast:.2f} > {slow:.2f}) — bullish momentum."
-            )
+            if bullish_cross:
+                reasons.append(
+                    f"Fast {c.ma_type.upper()}({c.fast_period}) crossed above slow "
+                    f"{c.ma_type.upper()}({c.slow_period}) ({fast:.2f} > {slow:.2f}) — bullish momentum."
+                )
+            else:
+                reasons.append(
+                    f"Fast {c.ma_type.upper()}({c.fast_period}) above slow "
+                    f"{c.ma_type.upper()}({c.slow_period}) ({fast:.2f} > {slow:.2f}) — established uptrend, entering."
+                )
             if trend_ma is not None:
                 reasons.append(f"Price ${price:,.2f} above trend MA({c.trend_period}) ${trend_ma:,.2f} — with the trend.")
             if adx_val is not None:
                 reasons.append(f"ADX {adx_val:.1f} ≥ {c.adx_min:.0f} — trend has strength.")
             reasons.append(f"RSI {rsi_val:.1f} below overbought ({c.rsi_overbought:.0f}) — room to run.")
             strength = min(1.0, 0.5 + gap * 10)
-        elif bullish_cross and not uptrend:
+        elif entry_trigger and not uptrend:
             reasons.append(
-                f"Bullish crossover, but price ${price:,.2f} is below trend MA({c.trend_period}) "
+                f"Fast MA above slow, but price ${price:,.2f} is below trend MA({c.trend_period}) "
                 f"${trend_ma:,.2f} — counter-trend, skipping the buy."
             )
-        elif bullish_cross and not trend_ok:
+        elif entry_trigger and not trend_ok:
             reasons.append(
-                f"Bullish crossover, but ADX {adx_val:.1f} < {c.adx_min:.0f} — market is choppy, skipping."
+                f"Fast MA above slow, but ADX {adx_val:.1f} < {c.adx_min:.0f} — market is choppy, skipping."
             )
         elif bullish_cross and rsi_val >= c.rsi_overbought:
+            # On a *fresh* crossover that's already overbought, stand aside rather
+            # than chase. (A re-arm entry that's overbought falls through to the
+            # take-profit SELL below instead — we'd be holding by then.)
             reasons.append(
                 f"Bullish crossover, but RSI {rsi_val:.1f} is overbought "
                 f"(>= {c.rsi_overbought:.0f}) — skipping the buy."
