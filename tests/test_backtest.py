@@ -38,6 +38,8 @@ def test_backtest_runs_and_reports_metrics():
     assert res.max_drawdown_pct >= 0.0
     # Pre-fee return must beat net return whenever fees were paid.
     assert res.gross_return_pct > res.total_return_pct
+    # A rising market has a positive buy-and-hold benchmark.
+    assert res.buy_hold_return_pct > 0
 
 
 def test_backtest_flat_market_makes_no_money():
@@ -51,6 +53,7 @@ def test_backtest_flat_market_makes_no_money():
     res = run_backtest(strat, _candles(closes), cfg, product_id="BTC-USD")
     assert res.num_trades == 0
     assert math.isclose(res.final_equity, 10_000, rel_tol=1e-9)
+    assert math.isclose(res.buy_hold_return_pct, 0.0, abs_tol=1e-9)  # flat price -> flat B&H
 
 
 def test_backtest_matches_engine_risk_layer():

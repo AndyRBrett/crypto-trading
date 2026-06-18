@@ -32,6 +32,7 @@ class BacktestResult:
     final_equity: float
     total_return_pct: float
     gross_return_pct: float   # pre-fee (net return with all fees added back)
+    buy_hold_return_pct: float  # passive benchmark: hold the asset over the window
     realized_pnl: float
     fees_paid: float
     num_trades: int          # round-trip exits
@@ -44,10 +45,12 @@ class BacktestResult:
 
     def summary(self) -> str:
         pf = "inf" if self.profit_factor == float("inf") else f"{self.profit_factor:.2f}"
+        vs_bh = self.total_return_pct - self.buy_hold_return_pct
         return (
             f"{self.strategy_type:>18} {self.product_id:<10} "
             f"net {self.total_return_pct:+7.2f}%  "
             f"gross {self.gross_return_pct:+7.2f}%  "
+            f"B&H {self.buy_hold_return_pct:+7.2f}% (vs {vs_bh:+6.2f}%)  "
             f"maxDD {self.max_drawdown_pct:5.2f}%  "
             f"trades {self.num_trades:>3}  win {self.win_rate*100:4.0f}%  "
             f"PF {pf:>5}  fees ${self.fees_paid:,.2f}"
@@ -110,6 +113,11 @@ def run_backtest(
     last_price = float(candles[-1]["close"]) if candles else 0.0
     final_equity = portfolio.total_equity({product_id: last_price})
 
+    # Passive benchmark: buy at the first bar the strategy could act on and hold
+    # to the end. The honest "did we beat doing nothing?" yardstick.
+    bench_start = float(candles[min_c]["close"]) if len(candles) > min_c else last_price
+    buy_hold_return_pct = (last_price / bench_start - 1) * 100 if bench_start else 0.0
+
     fees_paid = sum(t.fee for t in portfolio.trades)
     exits = [t for t in portfolio.trades if t.side == SELL]
     wins = sum(1 for t in exits if t.realized_pnl > 0)
@@ -132,6 +140,7 @@ def run_backtest(
         gross_return_pct=((final_equity - config.starting_cash + fees_paid) / config.starting_cash * 100)
         if config.starting_cash
         else 0.0,
+        buy_hold_return_pct=buy_hold_return_pct,
         realized_pnl=portfolio.realized_pnl(),
         fees_paid=fees_paid,
         num_trades=len(exits),
