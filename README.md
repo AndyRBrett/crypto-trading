@@ -306,6 +306,7 @@ sizing, stop-loss / take-profit / trailing-stop exits).
       sentiment, feed it into the signal.
 - [ ] **Natural-language strategy config** — "be aggressive when BTC dominance
       is rising" compiled into rules.
-- [ ] Backtesting harness over historical candles.
+- [x] Backtesting harness over historical candles (`scripts/backtest.py`, `scripts/sweep.py`).
+- [ ] Close (or beat) the buy-and-hold gap — see [TODO.md](TODO.md).
 - [ ] More indicators / strategies (MACD, Bollinger, multi-timeframe).
 - [ ] Always-on hosting option.
