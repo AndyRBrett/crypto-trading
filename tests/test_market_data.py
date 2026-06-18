@@ -122,6 +122,29 @@ def test_get_history_handles_short_history():
     assert len(candles) == 50  # all available, no infinite loop
 
 
+def test_get_history_skips_pre_listing_gap():
+    # Asset that only has data in the recent half of the requested window
+    # (e.g. SOL daily requested back to before it listed). get_history must skip
+    # the empty early pages and still return the available history.
+    md, mock_ex = _make_md()
+    tf_ms = 86_400_000  # daily
+    base = 1_700_000_000_000
+    full = [[base + i * tf_ms, 1.0, 1.0, 1.0, 1.0, 1.0] for i in range(120)]
+    listing_ts = full[0][0]
+    mock_ex.parse_timeframe.return_value = 86400
+    # "now" is ~2000 days after base, so the requested start is long before listing.
+    mock_ex.milliseconds.return_value = base + 2000 * tf_ms
+
+    def fake_fetch(symbol, timeframe=None, since=None, limit=None):
+        rows = [r for r in full if r[0] >= (since or 0)]
+        return rows[: (limit or 300)]  # empty when `since` is before listing_ts
+
+    mock_ex.fetch_ohlcv.side_effect = fake_fetch
+    candles = md.get_history("SOL-USD", granularity="ONE_DAY", count=2000)
+    assert len(candles) == 120  # found the data despite the long pre-listing gap
+    assert candles[0]["time"] == listing_ts // 1000
+
+
 # ---------------------------------------------------------------------------
 # get_price
 # ---------------------------------------------------------------------------

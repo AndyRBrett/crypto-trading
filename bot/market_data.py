@@ -157,13 +157,19 @@ class MarketData:
         since = now_ms - count * tf_ms
 
         by_time: dict[int, list] = {}
-        max_pages = count // 200 + 5  # safety bound on request count
+        max_pages = count // 150 + 25  # safety bound (room to skip pre-listing gaps)
         for _ in range(max_pages):
             try:
                 batch = ex.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=300)
             except ccxt.BaseError as exc:
                 raise MarketDataError(f"fetch_ohlcv failed for {symbol}: {exc}") from exc
             if not batch:
+                # No data at `since`. If we haven't collected anything yet, the
+                # requested start likely predates the asset's listing — jump
+                # forward a page and keep looking instead of giving up.
+                if not by_time and since < now_ms:
+                    since += 300 * tf_ms
+                    continue
                 break
             for row in batch:
                 by_time[int(row[0])] = row
