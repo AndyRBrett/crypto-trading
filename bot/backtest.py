@@ -31,6 +31,7 @@ class BacktestResult:
     starting_cash: float
     final_equity: float
     total_return_pct: float
+    gross_return_pct: float   # pre-fee (net return with all fees added back)
     realized_pnl: float
     fees_paid: float
     num_trades: int          # round-trip exits
@@ -45,7 +46,8 @@ class BacktestResult:
         pf = "inf" if self.profit_factor == float("inf") else f"{self.profit_factor:.2f}"
         return (
             f"{self.strategy_type:>18} {self.product_id:<10} "
-            f"ret {self.total_return_pct:+7.2f}%  "
+            f"net {self.total_return_pct:+7.2f}%  "
+            f"gross {self.gross_return_pct:+7.2f}%  "
             f"maxDD {self.max_drawdown_pct:5.2f}%  "
             f"trades {self.num_trades:>3}  win {self.win_rate*100:4.0f}%  "
             f"PF {pf:>5}  fees ${self.fees_paid:,.2f}"
@@ -108,6 +110,7 @@ def run_backtest(
     last_price = float(candles[-1]["close"]) if candles else 0.0
     final_equity = portfolio.total_equity({product_id: last_price})
 
+    fees_paid = sum(t.fee for t in portfolio.trades)
     exits = [t for t in portfolio.trades if t.side == SELL]
     wins = sum(1 for t in exits if t.realized_pnl > 0)
     losses = sum(1 for t in exits if t.realized_pnl < 0)
@@ -124,8 +127,13 @@ def run_backtest(
         total_return_pct=(final_equity / config.starting_cash - 1) * 100
         if config.starting_cash
         else 0.0,
+        # Pre-fee: add fees back to the net result. Approximate (zero fees would
+        # also shift sizing slightly), but a clean read on transaction-cost drag.
+        gross_return_pct=((final_equity - config.starting_cash + fees_paid) / config.starting_cash * 100)
+        if config.starting_cash
+        else 0.0,
         realized_pnl=portfolio.realized_pnl(),
-        fees_paid=sum(t.fee for t in portfolio.trades),
+        fees_paid=fees_paid,
         num_trades=len(exits),
         wins=wins,
         losses=losses,

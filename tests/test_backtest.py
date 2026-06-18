@@ -36,6 +36,8 @@ def test_backtest_runs_and_reports_metrics():
     assert res.total_return_pct > 0       # a steady uptrend should be profitable
     assert 0.0 <= res.win_rate <= 1.0
     assert res.max_drawdown_pct >= 0.0
+    # Pre-fee return must beat net return whenever fees were paid.
+    assert res.gross_return_pct > res.total_return_pct
 
 
 def test_backtest_flat_market_makes_no_money():

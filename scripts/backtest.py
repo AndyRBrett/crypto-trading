@@ -23,12 +23,18 @@ from bot.market_data import MarketData
 from bot.strategies import make_strategy
 
 
-def _resolve(base: Config, acct) -> Config:
-    """Per-account Config with None risk overrides inherited from the base."""
+def _resolve(base: Config, acct, fee_override=None) -> Config:
+    """Per-account Config with None risk overrides inherited from the base.
+
+    ``fee_override`` (when not None) forces the fee rate for every account, so a
+    single run can model a different cost assumption (maker fees, a higher volume
+    tier) without editing config.
+    """
 
     def pick(override, fallback):
         return fallback if override is None else override
 
+    fee = fee_override if fee_override is not None else pick(acct.fee_rate, base.fee_rate)
     return dataclasses.replace(
         base,
         products=acct.products,
@@ -36,7 +42,7 @@ def _resolve(base: Config, acct) -> Config:
         strategy=acct.strategy,
         strategy_type=acct.strategy_type,
         account_name=acct.name,
-        fee_rate=pick(acct.fee_rate, base.fee_rate),
+        fee_rate=fee,
         risk_per_trade_pct=pick(acct.risk_per_trade_pct, base.risk_per_trade_pct),
         max_position_pct=pick(acct.max_position_pct, base.max_position_pct),
         max_open_positions=pick(acct.max_open_positions, base.max_open_positions),
@@ -53,6 +59,8 @@ def main(argv=None) -> int:
     parser.add_argument("--config", default="config.yaml", help="config YAML path")
     parser.add_argument("--count", type=int, default=None, help="candles to fetch")
     parser.add_argument("--granularity", default=None, help="override candle granularity")
+    parser.add_argument("--fee", type=float, default=None,
+                        help="override fee rate for all accounts (e.g. 0.0025 for maker)")
     args = parser.parse_args(argv)
 
     config = Config.load(args.config)
@@ -60,15 +68,16 @@ def main(argv=None) -> int:
     count = args.count or config.candle_count
     market = MarketData(config)
 
+    eff_fee = args.fee if args.fee is not None else config.fee_rate
     print(
         f"Backtest — exchange={config.exchange} granularity={granularity} "
-        f"candles≈{count} fee={config.fee_rate:.4f}\n"
-        + "-" * 92
+        f"candles≈{count} fee={eff_fee:.4f}\n"
+        + "-" * 100
     )
 
     any_run = False
     for acct in config.accounts:
-        cfg = _resolve(config, acct)
+        cfg = _resolve(config, acct, fee_override=args.fee)
         strategy = make_strategy(cfg.strategy_type, cfg.strategy)
         for product in cfg.products:
             try:
