@@ -21,6 +21,7 @@ def export_combined_state(
     account_blocks: list[dict],
     prices: dict[str, float],
     price_history: dict | None = None,
+    granularity: str = "",
 ) -> None:
     """Write the unified multi-account ``state.json`` the dashboard reads.
 
@@ -51,6 +52,7 @@ def export_combined_state(
     state = {
         "schema": "multi-account-v1",
         "updated_at": time.time(),
+        "granularity": granularity,
         "products": products,
         "prices": prices,
         "price_history": price_history or {},
@@ -288,6 +290,7 @@ class Storage:
         # Flat single-account shape (unchanged): shared market data at the root.
         state = {
             "updated_at": time.time(),
+            "granularity": getattr(config, "candle_granularity", ""),
             "prices": prices,
             "price_history": price_history or {},
             **block,

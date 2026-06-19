@@ -173,7 +173,8 @@ class Runner:
                 )
             )
         export_combined_state(
-            self.config.dashboard_state_path, blocks, prices, price_history
+            self.config.dashboard_state_path, blocks, prices, price_history,
+            granularity=self.config.candle_granularity,
         )
 
     def status(self) -> list[dict]:
