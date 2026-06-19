@@ -59,6 +59,12 @@
   .chip.active { background: var(--accent); border-color: var(--accent); color: #06223f; font-weight: 600; }
   .strategy-note { color: var(--muted); font-size: 12px; line-height: 1.55; margin: 10px 0 18px; max-width: 760px; }
   .strategy-note strong { color: var(--text); font-weight: 600; }
+  .summary { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 12px 16px; margin-bottom: 18px; }
+  .summary:empty { display: none; }
+  .summary .sum-line { font-size: 15px; line-height: 1.5; }
+  .summary .sum-ret { font-weight: 700; margin-right: 6px; }
+  .summary .sum-sub { color: var(--muted); font-size: 13px; margin-top: 5px; }
+  .summary .sum-hint { color: var(--muted); font-size: 12px; margin-top: 7px; font-style: italic; }
   .info-btn { position: absolute; top: 8px; right: 8px; width: 17px; height: 17px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--muted); font: italic 600 11px/1 Georgia, "Times New Roman", serif; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
   .info-btn:hover { border-color: var(--accent); color: var(--accent); }
   .info-btn.inline { position: static; width: 15px; height: 15px; margin-left: 5px; vertical-align: middle; font-size: 10px; }
@@ -118,6 +124,8 @@
   <div class="filter" id="accountTabs"></div>
   <p class="strategy-note" id="strategyNote"></p>
 
+  <div class="summary" id="summary"></div>
+
   <div class="cards" id="cards"></div>
 
   <div class="filter" id="filter"></div>
@@ -168,6 +176,61 @@ const ago = (ts) => {
 
 function card(label, value, klass = "", info = "") {
   return `<div class="card">${info ? infoIcon(info) : ""}<div class="label">${label}</div><div class="value ${klass}">${value}</div></div>`;
+}
+
+// Granularity codes -> human labels (for the summary line and the price chart).
+const GRAN_PHRASE = {
+  ONE_MINUTE: "1-minute", FIVE_MINUTE: "5-minute", FIFTEEN_MINUTE: "15-minute",
+  THIRTY_MINUTE: "30-minute", ONE_HOUR: "hourly", TWO_HOUR: "2-hour",
+  SIX_HOUR: "6-hour", ONE_DAY: "daily",
+};
+const CANDLE_UNIT = {
+  ONE_MINUTE: "1m", FIVE_MINUTE: "5m", FIFTEEN_MINUTE: "15m", THIRTY_MINUTE: "30m",
+  ONE_HOUR: "1h", TWO_HOUR: "2h", SIX_HOUR: "6h", ONE_DAY: "1d",
+};
+
+// Plain-English "what's going on right now" banner. Translates the numbers into
+// a sentence or two so you can read the bot's state at a glance.
+function renderSummary(s) {
+  const el = document.getElementById("summary");
+  if (!el) return;
+  const ret = s.total_return_pct ?? 0;
+  const retStr = (ret >= 0 ? "+" : "") + ret.toFixed(2) + "%";
+  const positions = s.positions || [];
+  const sigs = Object.values(s.latest_signals || {});
+  const nMkts = sigs.length;
+
+  let stance;
+  if (positions.length) {
+    const parts = positions.map(p =>
+      `${fmtNum(p.quantity, 4)} ${p.product_id} (${p.unrealized_pnl >= 0 ? "+" : ""}${fmtUSD(p.unrealized_pnl)})`);
+    stance = `In the market — holding ${parts.join(", ")}.`;
+  } else {
+    stance = "Flat — all in cash, waiting for a setup.";
+  }
+
+  const holds = sigs.filter(x => x.action === "HOLD").length;
+  let decision = "";
+  if (nMkts) {
+    if (holds === nMkts) decision = `All ${nMkts} market${nMkts > 1 ? "s" : ""} on HOLD this check.`;
+    else {
+      const acts = sigs.filter(x => x.action !== "HOLD").map(x => x.action);
+      decision = `Active signal${acts.length > 1 ? "s" : ""}: ${acts.join(", ")}.`;
+    }
+  }
+
+  const last = (s.trades || [])[0];
+  const lastStr = last ? `Last trade ${ago(last.timestamp)}: ${last.side} ${last.product_id}.` : "No trades yet.";
+
+  const phrase = GRAN_PHRASE[s.granularity];
+  const cadence = phrase
+    ? `Entries are decided on ${phrase} closes, so long stretches of HOLD are normal and intended — fewer trades means less of your edge lost to fees.`
+    : "";
+
+  el.innerHTML =
+    `<div class="sum-line"><span class="sum-ret ${cls(ret)}">${retStr}</span>${stance}</div>` +
+    `<div class="sum-sub">${decision} ${lastStr}</div>` +
+    (cadence ? `<div class="sum-hint">${cadence}</div>` : "");
 }
 
 function renderCards(s) {
@@ -398,6 +461,7 @@ function buildTotalView(state) {
   accts.forEach(a => Object.entries(a.latest_signals || {}).forEach(([k, v]) => { latest[k] = v; }));
   return Object.assign({}, t, {
     updated_at: state.updated_at,
+    granularity: state.granularity,
     products: state.products,
     prices: state.prices,
     price_history: state.price_history,
@@ -410,6 +474,7 @@ function buildAccountView(state, name) {
   const a = (state.accounts || []).find(x => x.name === name) || state.accounts[0];
   return Object.assign({}, a, {
     updated_at: state.updated_at,
+    granularity: state.granularity,
     prices: state.prices,
     price_history: state.price_history,
   });
@@ -492,7 +557,7 @@ function renderMainChart(s) {
   const title = document.getElementById("chartTitle");
   document.getElementById("chartHead").innerHTML = "";
   if (selectedCoin === "ALL") { title.textContent = "Equity curve"; renderEquityChart(s); }
-  else { title.textContent = selectedCoin + " · 1h candles"; renderPriceChart(s, selectedCoin); }
+  else { title.textContent = selectedCoin + " · " + (CANDLE_UNIT[s.granularity] || "1h") + " candles"; renderPriceChart(s, selectedCoin); }
 }
 
 function renderPriceChart(s, coin) {
@@ -593,6 +658,7 @@ function renderPriceChart(s, coin) {
 
 function renderAll(s) {
   document.getElementById("updated").textContent = "updated " + ago(s.updated_at);
+  renderSummary(s);
   renderCards(s); renderFilter(s); renderMainChart(s);
   renderPositions(s); renderSignals(s); renderActivity(s); renderTrades(s);
 }
