@@ -204,6 +204,25 @@ driver_role: local
 (plus `GITHUB_TOKEN` in `.env`), then `python -m bot.main run`. The cloud config
 (`config.ci.yaml`) already has `coordinate_enabled: true` / `driver_role: cloud`.
 
+## Monitoring (`overseer-status.json`)
+
+A separate **Project Overseer** agent reviews this repo weekly and needs to see
+that the bot is alive and how it's doing — otherwise Trading is a blind spot.
+`write_status.py` writes `overseer-status.json` at the repo root from the bot's
+own SQLite trade stores (`trading*.db`), summarizing the last 7 days:
+
+```json
+{ "generated_at": "...Z", "window_days": 7, "trades": 0, "pnl": 0.0,
+  "last_fill_at": null, "errors": [] }
+```
+
+`generated_at` is how staleness is judged; `win_rate` (0–1) is included once
+there are closed trades in the window. A week with zero fills is reported as
+data (`trades: 0`), not an error. The always-on workflow regenerates and commits
+it once a day (right after a tick, so the trade stores are present), so the
+monitor always has a fresh snapshot. Run it by hand anytime with
+`python write_status.py`.
+
 ## CLI
 
 | Command  | What it does                                        |

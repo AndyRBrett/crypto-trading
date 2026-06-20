@@ -46,3 +46,29 @@ jobs:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           PUSH_SUBSCRIPTION: ${{ secrets.PUSH_SUBSCRIPTION }}
         run: python -m bot.main once --config config.ci.yaml
+
+      # Publish overseer-status.json for the external Project Overseer monitor
+      # (issue #16). The tick above pulls each account's trading.<name>.db into
+      # the workspace, so write_status.py reads the real trade store here. This
+      # workflow ticks hourly but the monitor only needs a daily refresh
+      # (staleness is judged from generated_at), so we publish once a day at
+      # 06:00 UTC — keeping main's history clean. A manual run always publishes.
+      - name: Publish overseer status
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" != "workflow_dispatch" ] && [ "$(date -u +%H)" != "06" ]; then
+            echo "Not the daily publish window (hour $(date -u +%H)); skipping."
+            exit 0
+          fi
+          python write_status.py
+          if git status --porcelain overseer-status.json | grep -q .; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add overseer-status.json
+            git commit -m "overseer status $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push origin HEAD:main \
+              || { git pull --rebase --autostash origin main && git push origin HEAD:main; }
+          else
+            echo "overseer-status.json unchanged; nothing to commit."
+          fi
