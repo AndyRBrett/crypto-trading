@@ -209,21 +209,27 @@ driver_role: local
 A separate **Project Overseer** agent reviews this repo weekly and needs to see
 that the bot is alive and how it's doing — otherwise Trading is a blind spot.
 `write_status.py` writes `overseer-status.json` at the repo root from the bot's
-own SQLite trade stores (`trading*.db`), summarizing the last 7 days:
+own SQLite trade stores (`trading*.db`), summarizing the headline 7-day window
+plus 30- and 90-day totals:
 
 ```json
 { "generated_at": "...Z", "last_run_at": "...Z", "window_days": 7,
-  "trades": 0, "pnl": 0.0, "signals_evaluated": 6, "last_fill_at": null,
+  "trades": 2, "pnl": 14.01, "win_rate": 1.0, "win_rate_low_sample": true,
+  "pnl_30d": 14.01, "trades_30d": 2, "pnl_90d": 14.01, "trades_90d": 2,
+  "signals_evaluated": 6, "signals_acted": 0, "last_fill_at": null,
   "errors": [] }
 ```
 
 `generated_at` is how staleness is judged; `win_rate` (0–1) is included once
-there are closed trades in the window. A week with zero fills is reported as
-data (`trades: 0`), not an error. `last_run_at` (always written) and
+there are closed trades in the window, with `win_rate_low_sample: true` when
+fewer than ten back it so a 1–2 trade week's perfect score is greyed out rather
+than trusted. `pnl_30d` / `pnl_90d` (and their trade counts) keep a quiet week
+from hiding longer-term performance. A week with zero fills is reported as
+data (`trades: 0`), not an error. `last_run_at` (always written),
 `signals_evaluated` (signals the strategy scored this run, counted from
-`signal_log`) are a heartbeat: a healthy-but-idle bot (`signals_evaluated > 0`,
-`trades: 0`) is distinguishable from a silently dead one (`signals_evaluated:
-0`). The always-on workflow regenerates and commits it once a day (right after a
+`signal_log`) and `signals_acted` (how many of those became a trade) are a
+heartbeat: a healthy-but-idle bot (`signals_evaluated > 0`, `trades: 0`) is
+distinguishable from a silently dead one (`signals_evaluated: 0`). The always-on workflow regenerates and commits it once a day (right after a
 tick, so the trade stores are present), so the monitor always has a fresh
 snapshot. Run it by hand anytime with `python write_status.py`.
 
