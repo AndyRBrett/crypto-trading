@@ -9,6 +9,10 @@ review to confirm the bot isn't a blind spot (issue #16). It summarizes the last
 Metrics that can't be computed are omitted rather than invented. ``errors`` is
 empty when healthy: a week with zero fills is reported as data (``trades: 0``),
 not an error — only an unreadable / missing trade store is flagged.
+
+It also emits a heartbeat (issue #18): ``last_run_at`` (every run) and
+``signals_evaluated`` (signals scored this run, counted from the ``signal_log``
+table) so a healthy-but-idle bot is distinguishable from a silently dead one.
 """
 
 from __future__ import annotations
@@ -22,6 +26,10 @@ from datetime import datetime, timezone
 WINDOW_DAYS = 7
 STATUS_PATH = "overseer-status.json"
 DB_GLOB = "trading*.db"  # per-account (trading.<name>.db) + legacy trading.db
+# A tick logs one signal_log row per product (including HOLDs). run-bot ticks at
+# most hourly and write_status runs right after the tick in the same job, so
+# signals written within this window belong to the run that just executed.
+SIGNAL_RUN_WINDOW = 900  # seconds (15 min)
 
 
 def _iso(ts: float) -> str:
@@ -51,6 +59,8 @@ def collect_metrics(now: float | None = None) -> dict:
     window_closed = 0         # closed (SELL) trades in the window
     window_wins = 0           # closed trades that realized a profit
     last_fill: float | None = None  # most recent fill across all history
+    signals_evaluated = 0     # signals scored in the run that just executed
+    run_since = now - SIGNAL_RUN_WINDOW
 
     for path in db_paths:
         try:
@@ -59,6 +69,14 @@ def collect_metrics(now: float | None = None) -> dict:
             rows = conn.execute(
                 "SELECT timestamp, side, realized_pnl FROM trades"
             ).fetchall()
+            try:
+                (n,) = conn.execute(
+                    "SELECT COUNT(*) FROM signal_log WHERE timestamp >= ?",
+                    (run_since,),
+                ).fetchone()
+                signals_evaluated += n
+            except sqlite3.Error:
+                pass  # older store without signal_log; heartbeat stays 0 for it
             conn.close()
         except sqlite3.Error as exc:
             errors.append(f"{path}: {exc}")
@@ -78,6 +96,11 @@ def collect_metrics(now: float | None = None) -> dict:
 
     status: dict = {
         "generated_at": _iso(now),
+        # Heartbeat: last_run_at is always written, and signals_evaluated proves
+        # the strategy pipeline executed this run — so a healthy-but-idle bot
+        # (signals_evaluated > 0, trades 0) is distinguishable from a stalled one
+        # (signals_evaluated 0) even when both report trades=0/pnl=0/errors=[].
+        "last_run_at": _iso(now),
         "window_days": WINDOW_DAYS,
     }
     # Trade counts / P&L need a readable store; omit them if we couldn't read one.
@@ -87,6 +110,7 @@ def collect_metrics(now: float | None = None) -> dict:
         # Win rate is undefined with no closed trades in the window — omit it.
         if window_closed:
             status["win_rate"] = round(window_wins / window_closed, 3)
+    status["signals_evaluated"] = signals_evaluated
     status["last_fill_at"] = _iso(last_fill) if last_fill is not None else None
     status["errors"] = errors
     return status
