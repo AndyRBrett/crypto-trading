@@ -6,10 +6,10 @@ from bot.storage import Storage
 import write_status
 
 
-def _trade(ts, side, pnl=0.0):
+def _trade(ts, side, pnl=0.0, price=100.0, product="BTC-USD", qty=1.0):
     return Trade(
-        timestamp=ts, product_id="BTC-USD", side=side, price=100.0,
-        quantity=1.0, fee=0.0, cash_after=0.0, realized_pnl=pnl,
+        timestamp=ts, product_id=product, side=side, price=price,
+        quantity=qty, fee=0.0, cash_after=0.0, realized_pnl=pnl,
     )
 
 
@@ -64,6 +64,77 @@ def test_low_sample_flag_clears_with_enough_trades(tmp_path):
     status = write_status.collect_metrics(now)
     assert status["win_rate"] == 1.0
     assert "win_rate_low_sample" not in status
+
+
+def test_benchmark_and_equity_curve(tmp_path):
+    now = 2_000_000_000.0
+    day = 86_400
+    s = Storage(os.path.join(str(tmp_path), "trading.bench.db"))
+    # One round trip in BTC: deploy $100 of notional, realize +$5.
+    s.save_trade(_trade(now - 5 * day, "BUY", price=100.0))
+    s.save_trade(_trade(now - 2 * day, "SELL", pnl=5.0, price=105.0))
+    # Per-tick marks frame the window: BTC ran 100 -> 110 (buy-and-hold +10%).
+    s.save_signal(now - 5 * day, "BTC-USD", "BUY", 100.0, "entry")
+    s.save_signal(now - 60, "BTC-USD", "HOLD", 110.0, "hold")
+    # Equity snapshots (timestamp isn't settable via save_equity, so insert direct).
+    s.conn.execute(
+        "INSERT INTO equity(timestamp, cash, market_value, equity) VALUES (?,?,?,?)",
+        (now - 5 * day, 1000.0, 0.0, 1000.0),
+    )
+    s.conn.execute(
+        "INSERT INTO equity(timestamp, cash, market_value, equity) VALUES (?,?,?,?)",
+        (now - 60, 1010.0, 0.0, 1010.0),
+    )
+    s.conn.commit()
+    s.close()
+    os.chdir(str(tmp_path))
+
+    status = write_status.collect_metrics(now)
+
+    bm = status["benchmark"]
+    assert bm["deployed_notional"] == 100.0
+    assert bm["strategy_pnl"] == 5.0
+    assert bm["buy_hold_pnl"] == 10.0          # 100 * (110/100 - 1)
+    assert bm["strategy_return_pct"] == 5.0
+    assert bm["buy_hold_return_pct"] == 10.0
+    assert bm["alpha_pct"] == -5.0             # strategy trailed buy-and-hold
+
+    curve = status["equity_curve"]
+    assert len(curve) == 2
+    assert curve[0]["equity"] == 1000.0 and curve[-1]["equity"] == 1010.0
+
+
+def test_no_benchmark_without_deployed_capital(tmp_path):
+    now = 2_000_000_000.0
+    s = Storage(os.path.join(str(tmp_path), "trading.flat.db"))
+    s.save_signal(now - 60, "BTC-USD", "HOLD", 100.0, "no signal")
+    s.close()
+    os.chdir(str(tmp_path))
+    status = write_status.collect_metrics(now)
+    assert "benchmark" not in status  # nothing bought in the window to benchmark
+
+
+def test_decision_log_and_rejection_reasons(tmp_path):
+    now = 2_000_000_000.0
+    s = Storage(os.path.join(str(tmp_path), "trading.dec.db"))
+    s.save_signal(now - 60, "BTC-USD", "BUY", 100.0, "entry",
+                  outcome="acted", slippage_bps=20.0)
+    s.save_signal(now - 60, "ETH-USD", "HOLD", 50.0, "no signal", outcome="hold")
+    s.save_signal(now - 60, "SOL-USD", "BUY", 10.0, "at cap",
+                  outcome="rejected", reject_code="max_open_positions")
+    s.save_signal(now - 60, "ADA-USD", "BUY", 1.0, "no cash",
+                  outcome="rejected", reject_code="insufficient_balance")
+    s.close()
+    os.chdir(str(tmp_path))
+
+    status = write_status.collect_metrics(now)
+    assert status["signals_evaluated"] == 4
+    assert len(status["decisions"]) == 4
+    assert status["rejection_reasons"] == {
+        "max_open_positions": 1,
+        "insufficient_balance": 1,
+    }
+    assert status["avg_slippage_bps"] == 20.0
 
 
 def test_missing_store_is_an_error(tmp_path):

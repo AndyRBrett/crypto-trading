@@ -19,6 +19,64 @@ def test_signal_log_roundtrip():
     s.close()
 
 
+def test_signal_log_records_outcome_and_slippage():
+    tmp = tempfile.mkdtemp()
+    s = Storage(os.path.join(tmp, "t.db"))
+    s.save_signal(
+        1.0, "BTC-USD", "BUY", 100.0, "bullish crossover",
+        outcome="acted", reject_code="", slippage_bps=12.5,
+    )
+    s.save_signal(
+        2.0, "ETH-USD", "BUY", 50.0, "at max positions",
+        outcome="rejected", reject_code="max_open_positions",
+    )
+    acts = s.load_activity()
+    assert acts[0]["reject_code"] == "max_open_positions"
+    assert acts[0]["outcome"] == "rejected"
+    assert acts[0]["slippage_bps"] is None  # nothing filled
+    assert acts[1]["outcome"] == "acted"
+    assert acts[1]["slippage_bps"] == 12.5
+    s.close()
+
+
+def test_save_signal_defaults_stay_backward_compatible():
+    tmp = tempfile.mkdtemp()
+    s = Storage(os.path.join(tmp, "t.db"))
+    s.save_signal(1.0, "BTC-USD", "HOLD", 100.0, "no crossover")  # legacy 5-arg call
+    act = s.load_activity()[0]
+    assert act["outcome"] == "" and act["reject_code"] == "" and act["slippage_bps"] is None
+    s.close()
+
+
+def test_migrates_legacy_signal_log_without_decision_columns():
+    import sqlite3
+
+    tmp = tempfile.mkdtemp()
+    db = os.path.join(tmp, "legacy.db")
+    # Simulate a store created before the decision-log columns existed.
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE signal_log (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "timestamp REAL NOT NULL, product_id TEXT NOT NULL, action TEXT NOT NULL, "
+        "price REAL NOT NULL, reason TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO signal_log(timestamp, product_id, action, price, reason) "
+        "VALUES (1.0, 'BTC-USD', 'HOLD', 100.0, 'old row')"
+    )
+    conn.commit()
+    conn.close()
+
+    # Opening through Storage migrates the table in place; old rows survive and
+    # new writes carry the decision-log fields.
+    s = Storage(db)
+    s.save_signal(2.0, "ETH-USD", "BUY", 50.0, "new row", outcome="acted", slippage_bps=3.0)
+    acts = s.load_activity()
+    assert acts[1]["reason"] == "old row" and acts[1]["outcome"] == ""
+    assert acts[0]["outcome"] == "acted" and acts[0]["slippage_bps"] == 3.0
+    s.close()
+
+
 def test_load_activity_respects_limit():
     tmp = tempfile.mkdtemp()
     s = Storage(os.path.join(tmp, "t.db"))

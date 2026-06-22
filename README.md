@@ -216,8 +216,15 @@ plus 30- and 90-day totals:
 { "generated_at": "...Z", "last_run_at": "...Z", "window_days": 7,
   "trades": 2, "pnl": 14.01, "win_rate": 1.0, "win_rate_low_sample": true,
   "pnl_30d": 14.01, "trades_30d": 2, "pnl_90d": 14.01, "trades_90d": 2,
-  "signals_evaluated": 6, "signals_acted": 0, "last_fill_at": null,
-  "errors": [] }
+  "benchmark": { "deployed_notional": 966.0, "strategy_pnl": 14.01,
+                 "buy_hold_pnl": 7.7, "strategy_return_pct": 1.45,
+                 "buy_hold_return_pct": 0.8, "alpha_pct": 0.65 },
+  "equity_curve": [ { "t": "...Z", "equity": 1000.0 }, { "t": "...Z", "equity": 1014.01 } ],
+  "signals_evaluated": 6, "signals_acted": 2,
+  "decisions": [ { "product_id": "BTC-USD", "action": "BUY", "outcome": "acted",
+                   "reject_code": "", "slippage_bps": 3.1 } ],
+  "rejection_reasons": { "no_signal": 3, "size_zero": 1 }, "avg_slippage_bps": 3.1,
+  "last_fill_at": null, "errors": [] }
 ```
 
 `generated_at` is how staleness is judged; `win_rate` (0–1) is included once
@@ -229,7 +236,19 @@ data (`trades: 0`), not an error. `last_run_at` (always written),
 `signals_evaluated` (signals the strategy scored this run, counted from
 `signal_log`) and `signals_acted` (how many of those became a trade) are a
 heartbeat: a healthy-but-idle bot (`signals_evaluated > 0`, `trades: 0`) is
-distinguishable from a silently dead one (`signals_evaluated: 0`). The always-on workflow regenerates and commits it once a day (right after a
+distinguishable from a silently dead one (`signals_evaluated: 0`).
+
+`benchmark` turns raw P&L into alpha-vs-holding: it marks each traded symbol at
+the window's start and end, holds the notional the strategy actually deployed,
+and reports the strategy's return against that buy-and-hold return plus the
+`alpha_pct` between them (omitted when no capital was deployed in the window).
+`equity_curve` is a small rolling series for a dashboard chart. The decision log
+accounts for every evaluated signal: `decisions` lists each one's `outcome`
+(`acted` / `rejected` / `hold`) and `reject_code`, `rejection_reasons` tallies
+why signals didn't trade (e.g. `no_signal`, `size_zero`, `max_open_positions`),
+and `avg_slippage_bps` is the realized signal-to-fill slippage on acted signals.
+
+The always-on workflow regenerates and commits it once a day (right after a
 tick, so the trade stores are present), so the monitor always has a fresh
 snapshot. Run it by hand anytime with `python write_status.py`.
 

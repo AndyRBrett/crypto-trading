@@ -105,11 +105,32 @@ class Storage:
                 product_id TEXT NOT NULL,
                 action TEXT NOT NULL,
                 price REAL NOT NULL,
-                reason TEXT NOT NULL
+                reason TEXT NOT NULL,
+                outcome TEXT NOT NULL DEFAULT '',
+                reject_code TEXT NOT NULL DEFAULT '',
+                slippage_bps REAL
             );
             """
         )
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Add columns introduced after a store was first created.
+
+        ``CREATE TABLE IF NOT EXISTS`` leaves an existing signal_log on its old
+        schema, so the decision-log columns (issue #23 — why a signal didn't
+        trade, plus realized slippage) are added in place when missing. Cheap and
+        idempotent: every run checks, only the first one alters.
+        """
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(signal_log)")}
+        for col, ddl in (
+            ("outcome", "ALTER TABLE signal_log ADD COLUMN outcome TEXT NOT NULL DEFAULT ''"),
+            ("reject_code", "ALTER TABLE signal_log ADD COLUMN reject_code TEXT NOT NULL DEFAULT ''"),
+            ("slippage_bps", "ALTER TABLE signal_log ADD COLUMN slippage_bps REAL"),
+        ):
+            if col not in cols:
+                self.conn.execute(ddl)
 
     # -- meta --------------------------------------------------------------
 
@@ -127,17 +148,36 @@ class Storage:
 
     # -- activity log (every tick's decision, including HOLDs) --------------
 
-    def save_signal(self, timestamp: float, product_id: str, action: str, price: float, reason: str) -> None:
+    def save_signal(
+        self,
+        timestamp: float,
+        product_id: str,
+        action: str,
+        price: float,
+        reason: str,
+        outcome: str = "",
+        reject_code: str = "",
+        slippage_bps: float | None = None,
+    ) -> None:
+        """Record one evaluated signal.
+
+        ``outcome`` is ``acted`` / ``rejected`` / ``hold``; ``reject_code`` is a
+        stable enum (see bot/engine.py) explaining why a signal didn't trade, so
+        the overseer can account for every evaluated signal instead of guessing.
+        ``slippage_bps`` is the realized gap between the signal price and the fill
+        price on acted signals (``None`` when nothing filled).
+        """
         self.conn.execute(
-            "INSERT INTO signal_log(timestamp, product_id, action, price, reason) "
-            "VALUES(?, ?, ?, ?, ?)",
-            (timestamp, product_id, action, price, reason),
+            "INSERT INTO signal_log(timestamp, product_id, action, price, reason, "
+            "outcome, reject_code, slippage_bps) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            (timestamp, product_id, action, price, reason, outcome, reject_code, slippage_bps),
         )
         self.conn.commit()
 
     def load_activity(self, limit: int = 60) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT timestamp, product_id, action, price, reason "
+            "SELECT timestamp, product_id, action, price, reason, "
+            "outcome, reject_code, slippage_bps "
             "FROM signal_log ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()

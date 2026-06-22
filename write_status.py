@@ -20,10 +20,23 @@ It also emits a heartbeat (issue #18): ``last_run_at`` (every run) and
 ``signals_evaluated`` (signals scored this run, counted from the ``signal_log``
 table) so a healthy-but-idle bot is distinguishable from a silently dead one.
 ``signals_acted`` is how many of those scored signals actually became a trade.
+
+Two further enrichments turn raw numbers into evaluable signal:
+
+* A buy-and-hold ``benchmark`` (issue #22): raw P&L doesn't say whether the
+  strategy beats passively holding the same coins. Using per-symbol mark prices
+  at the window's start and end (from the trade + signal logs), weighted by the
+  notional the strategy actually deployed, it reports ``strategy_return_pct`` vs.
+  ``buy_hold_return_pct`` and the ``alpha_pct`` between them, plus a small rolling
+  ``equity_curve`` for a dashboard chart.
+* A per-signal decision log (issue #23): ``rejection_reasons`` (a count of why
+  evaluated signals didn't trade) and ``avg_slippage_bps`` (realized signal-to-
+  fill slippage on the ones that did), so tuning is data-driven instead of guesswork.
 """
 
 from __future__ import annotations
 
+import bisect
 import glob
 import json
 import sqlite3
@@ -41,11 +54,45 @@ DB_GLOB = "trading*.db"  # per-account (trading.<name>.db) + legacy trading.db
 # most hourly and write_status runs right after the tick in the same job, so
 # signals written within this window belong to the run that just executed.
 SIGNAL_RUN_WINDOW = 900  # seconds (15 min)
+# Cap the rolling equity curve so the status file stays small; the series is
+# downsampled to at most this many points across the headline window.
+MAX_EQUITY_POINTS = 48
 
 
 def _iso(ts: float) -> str:
     """Epoch seconds -> ISO-8601 UTC with a Z suffix (2026-06-19T18:24:30Z)."""
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _aggregate_equity(series: list[list[tuple[float, float]]]) -> list[tuple[float, float]]:
+    """Sum per-store equity snapshots into one portfolio-wide curve.
+
+    ``series`` is one sorted ``[(timestamp, equity), ...]`` list per store. The
+    stores tick independently, so at each observed timestamp we forward-fill each
+    store's most recent equity (its last snapshot at-or-before that instant) and
+    sum across stores. For the common single-store case this is just that store's
+    own curve. The result is downsampled to ``MAX_EQUITY_POINTS`` (first and last
+    always kept) to keep the status file small.
+    """
+    series = [s for s in series if s]
+    if not series:
+        return []
+    timestamps = sorted({ts for s in series for ts, _ in s})
+    ts_lists = [[ts for ts, _ in s] for s in series]
+    eq_lists = [[eq for _, eq in s] for s in series]
+    curve: list[tuple[float, float]] = []
+    for ts in timestamps:
+        total = 0.0
+        for tl, el in zip(ts_lists, eq_lists):
+            i = bisect.bisect_right(tl, ts) - 1
+            if i >= 0:  # store had started by this instant
+                total += el[i]
+        curve.append((ts, total))
+    if len(curve) > MAX_EQUITY_POINTS:
+        step = (len(curve) - 1) / (MAX_EQUITY_POINTS - 1)
+        idxs = sorted({round(k * step) for k in range(MAX_EQUITY_POINTS)})
+        curve = [curve[i] for i in idxs]
+    return curve
 
 
 def collect_metrics(now: float | None = None) -> dict:
@@ -59,6 +106,7 @@ def collect_metrics(now: float | None = None) -> dict:
     now = time.time() if now is None else now
     windows = (WINDOW_DAYS, *EXTRA_WINDOW_DAYS)
     window_starts = {d: now - d * 86_400 for d in windows}
+    head_start = window_starts[WINDOW_DAYS]
     errors: list[str] = []
 
     db_paths = sorted(glob.glob(DB_GLOB))
@@ -76,26 +124,56 @@ def collect_metrics(now: float | None = None) -> dict:
     signals_acted = 0         # those that actually became a trade this run
     run_since = now - SIGNAL_RUN_WINDOW
 
+    # Buy-and-hold benchmark accumulators over the headline window (issue #22).
+    buy_notional: dict[str, float] = {}            # strategy capital deployed per symbol
+    first_mark: dict[str, tuple[float, float]] = {}  # earliest (ts, price) seen per symbol
+    last_mark: dict[str, tuple[float, float]] = {}   # latest (ts, price) seen per symbol
+    equity_series: list[list[tuple[float, float]]] = []  # one curve per store
+    # Per-signal decision log for the run that just executed (issue #23).
+    decisions: list[dict] = []
+
+    def _mark(product_id: str, ts: float, price: float) -> None:
+        """Record a price observation so the window's start/end marks can be found."""
+        if product_id not in first_mark or ts < first_mark[product_id][0]:
+            first_mark[product_id] = (ts, price)
+        if product_id not in last_mark or ts > last_mark[product_id][0]:
+            last_mark[product_id] = (ts, price)
+
     for path in db_paths:
         try:
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT timestamp, side, realized_pnl FROM trades"
+                "SELECT timestamp, product_id, side, price, quantity, realized_pnl "
+                "FROM trades"
             ).fetchall()
             try:
-                (n,) = conn.execute(
-                    "SELECT COUNT(*) FROM signal_log WHERE timestamp >= ?",
-                    (run_since,),
-                ).fetchone()
-                signals_evaluated += n
+                sig_rows = conn.execute(
+                    "SELECT timestamp, product_id, price FROM signal_log "
+                    "WHERE timestamp >= ?",
+                    (head_start,),
+                ).fetchall()
             except sqlite3.Error:
-                pass  # older store without signal_log; heartbeat stays 0 for it
+                sig_rows = []  # older store without signal_log
+            decisions += _store_decisions(conn, run_since)
+            equity_series.append(
+                [
+                    (r["timestamp"], r["equity"])
+                    for r in conn.execute(
+                        "SELECT timestamp, equity FROM equity "
+                        "WHERE timestamp >= ? ORDER BY timestamp",
+                        (head_start,),
+                    )
+                ]
+            )
             conn.close()
         except sqlite3.Error as exc:
             errors.append(f"{path}: {exc}")
             continue
         read_any = True
+        signals_evaluated += sum(1 for r in sig_rows if r["timestamp"] >= run_since)
+        for r in sig_rows:
+            _mark(r["product_id"], r["timestamp"], r["price"])
         for r in rows:
             ts = r["timestamp"]
             if last_fill is None or ts > last_fill:
@@ -103,6 +181,14 @@ def collect_metrics(now: float | None = None) -> dict:
             # A fill in the run window is a signal that was acted on this run.
             if ts >= run_since:
                 signals_acted += 1
+            if ts >= head_start:
+                # Every fill is also a mark for the benchmark, and BUYs are the
+                # capital the strategy deployed (its buy-and-hold weighting).
+                _mark(r["product_id"], ts, r["price"])
+                if r["side"] == "BUY":
+                    buy_notional[r["product_id"]] = (
+                        buy_notional.get(r["product_id"], 0.0) + r["price"] * r["quantity"]
+                    )
             for d in windows:
                 if ts >= window_starts[d]:
                     fills[d] += 1
@@ -136,11 +222,102 @@ def collect_metrics(now: float | None = None) -> dict:
         for d in EXTRA_WINDOW_DAYS:
             status[f"pnl_{d}d"] = round(pnl[d], 2)
             status[f"trades_{d}d"] = fills[d]
+        # Buy-and-hold benchmark + equity curve (issue #22): turn the bare P&L
+        # into alpha-vs-holding. Omitted when nothing was deployed in the window.
+        benchmark = _benchmark(pnl[WINDOW_DAYS], buy_notional, first_mark, last_mark)
+        if benchmark is not None:
+            status["benchmark"] = benchmark
+        curve = _aggregate_equity(equity_series)
+        if curve:
+            status["equity_curve"] = [
+                {"t": _iso(ts), "equity": round(eq, 2)} for ts, eq in curve
+            ]
     status["signals_evaluated"] = signals_evaluated
     status["signals_acted"] = signals_acted
+    # Decision log (issue #23): why each evaluated signal did/didn't trade, and
+    # the realized slippage on the ones that did.
+    if decisions:
+        status["decisions"] = decisions
+        rejections: dict[str, int] = {}
+        slippages: list[float] = []
+        for d in decisions:
+            if d["outcome"] == "acted":
+                if d.get("slippage_bps") is not None:
+                    slippages.append(d["slippage_bps"])
+            elif d.get("reject_code"):
+                rejections[d["reject_code"]] = rejections.get(d["reject_code"], 0) + 1
+        if rejections:
+            status["rejection_reasons"] = rejections
+        if slippages:
+            status["avg_slippage_bps"] = round(sum(slippages) / len(slippages), 2)
     status["last_fill_at"] = _iso(last_fill) if last_fill is not None else None
     status["errors"] = errors
     return status
+
+
+def _store_decisions(conn: sqlite3.Connection, run_since: float) -> list[dict]:
+    """Per-signal decisions logged in the run window, oldest first.
+
+    Reads the decision-log columns (issue #23). Stores written before those
+    columns existed simply contribute nothing — guarded so an old store never
+    breaks the status write.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT product_id, action, outcome, reject_code, slippage_bps "
+            "FROM signal_log WHERE timestamp >= ? ORDER BY id",
+            (run_since,),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    out = []
+    for r in rows:
+        out.append(
+            {
+                "product_id": r["product_id"],
+                "action": r["action"],
+                "outcome": r["outcome"] or "hold",
+                "reject_code": r["reject_code"] or "",
+                "slippage_bps": r["slippage_bps"],
+            }
+        )
+    return out
+
+
+def _benchmark(
+    strategy_pnl: float,
+    buy_notional: dict[str, float],
+    first_mark: dict[str, tuple[float, float]],
+    last_mark: dict[str, tuple[float, float]],
+) -> dict | None:
+    """Buy-and-hold benchmark over the headline window (issue #22).
+
+    For each symbol the strategy deployed capital into, value that capital as if
+    it had simply been held from the window's start mark to its end mark, then
+    compare against the strategy's realized P&L. Both returns are expressed
+    against the same deployed notional so ``alpha_pct`` is apples-to-apples.
+
+    Returns ``None`` when no capital was deployed in the window (nothing to
+    benchmark against).
+    """
+    deployed = sum(buy_notional.values())
+    if deployed <= 0:
+        return None
+    bh_pnl = 0.0
+    for product_id, notional in buy_notional.items():
+        start = first_mark.get(product_id)
+        end = last_mark.get(product_id)
+        if not start or not end or start[1] <= 0:
+            continue
+        bh_pnl += notional * (end[1] / start[1] - 1)
+    return {
+        "deployed_notional": round(deployed, 2),
+        "strategy_pnl": round(strategy_pnl, 2),
+        "buy_hold_pnl": round(bh_pnl, 2),
+        "strategy_return_pct": round(strategy_pnl / deployed * 100, 3),
+        "buy_hold_return_pct": round(bh_pnl / deployed * 100, 3),
+        "alpha_pct": round((strategy_pnl - bh_pnl) / deployed * 100, 3),
+    }
 
 
 def main() -> int:

@@ -29,6 +29,20 @@ from .strategy import BUY, HOLD, SELL
 
 log = logging.getLogger(__name__)
 
+# Why an evaluated signal did or didn't become a trade (issue #23). These stable
+# enums land in signal_log.reject_code so the overseer can account for every
+# evaluated signal — "4 of 6 didn't trade" becomes a breakdown of reasons rather
+# than a silent gap. ACTED is the empty string so a filled signal carries no code.
+ACTED = ""
+NO_SIGNAL = "no_signal"            # strategy held while flat: no entry trigger
+NO_POSITION = "no_position"        # strategy SELL while flat: nothing to sell
+IN_POSITION = "in_position"        # holding; no protective exit or SELL fired
+MAX_OPEN_POSITIONS = "max_open_positions"  # BUY blocked: at max concurrent positions
+SIZE_ZERO = "size_zero"            # BUY sized to ~0 by risk limits / dust floor
+INSUFFICIENT_BALANCE = "insufficient_balance"  # BUY rejected: not enough cash
+# reject_codes that mean "we wanted to BUY but couldn't" vs. "no actionable signal".
+_REJECTED_CODES = frozenset({MAX_OPEN_POSITIONS, SIZE_ZERO, INSUFFICIENT_BALANCE})
+
 
 class Engine:
     def __init__(
@@ -165,18 +179,32 @@ class Engine:
                 price,
                 "; ".join(signal.reasons),
             )
-            # Record every tick's decision (including HOLDs) as an activity log.
+
+            trade, reject_code = self._manage(signal, price, candles, prices)
+            if trade is not None:
+                executed.append(trade)
+
+            # Record every tick's decision (including HOLDs) as an activity log,
+            # tagged with why it did or didn't trade and the realized slippage
+            # between the signal price (last *closed* candle) and the live fill
+            # price (issue #23). Slippage is meaningful only on acted signals.
+            if trade is not None:
+                outcome = "acted"
+                slippage_bps = (
+                    round((trade.price - signal.price) / signal.price * 1e4, 2)
+                    if signal.price else None
+                )
+            else:
+                outcome = "rejected" if reject_code in _REJECTED_CODES else "hold"
+                slippage_bps = None
             try:
                 self.storage.save_signal(
                     time.time(), product_id, signal.action, price,
                     signal.reasons[0] if signal.reasons else "",
+                    outcome=outcome, reject_code=reject_code, slippage_bps=slippage_bps,
                 )
             except Exception as exc:  # never let logging break a tick
                 log.warning("could not record activity for %s: %s", product_id, exc)
-
-            trade = self._manage(signal, price, candles, prices)
-            if trade is not None:
-                executed.append(trade)
 
         # Surface this tick's market snapshot for the Runner's combined export.
         self.last_prices = prices
@@ -211,6 +239,10 @@ class Engine:
         While holding: protective exits (stop / take-profit / trailing) take
         priority, then a strategy SELL. While flat: a strategy BUY, sized by
         volatility so each trade risks a fixed fraction of equity.
+
+        Returns ``(trade_or_None, reject_code)`` where ``reject_code`` is a stable
+        enum (``ACTED`` when a trade executed) recording why a signal didn't
+        trade, so the activity log can explain every evaluated signal.
         """
         product_id = signal.product_id
         pos = self.portfolio.position(product_id)
@@ -221,21 +253,23 @@ class Engine:
             if exit_reason is None and signal.action == SELL:
                 exit_reason = "; ".join(signal.reasons)
             if exit_reason:
-                return self._sell(product_id, price, pos.quantity, [exit_reason], signal.indicators)
-            return None
+                trade = self._sell(product_id, price, pos.quantity, [exit_reason], signal.indicators)
+                return trade, ACTED if trade else IN_POSITION
+            return None, IN_POSITION
 
         if signal.action == BUY:
             open_count = sum(1 for p in self.portfolio.positions.values() if p.quantity > 0)
             if open_count >= self.config.max_open_positions:
                 log.info("%s: at max open positions (%d), skipping BUY", product_id, open_count)
-                return None
+                return None, MAX_OPEN_POSITIONS
             qty = self._position_size(price, atr, prices)
             if qty <= 0:
                 log.info("%s: position size ~0 after risk limits, skipping BUY", product_id)
-                return None
-            return self._buy(product_id, price, qty, signal.reasons, signal.indicators)
+                return None, SIZE_ZERO
+            trade = self._buy(product_id, price, qty, signal.reasons, signal.indicators)
+            return trade, ACTED if trade else INSUFFICIENT_BALANCE
 
-        return None
+        return None, NO_POSITION if signal.action == SELL else NO_SIGNAL
 
     def _protective_exit(self, product_id, pos, price, atr, candles):
         """Return an exit reason if a stop/target/trailing level is breached."""

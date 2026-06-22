@@ -7,8 +7,16 @@ network, or LLM is involved.
 import time
 
 from bot.config import Config
-from bot.engine import Engine
-from bot.strategy import BUY
+from bot.engine import (
+    ACTED,
+    IN_POSITION,
+    MAX_OPEN_POSITIONS,
+    NO_POSITION,
+    NO_SIGNAL,
+    SIZE_ZERO,
+    Engine,
+)
+from bot.strategy import BUY, HOLD, SELL, Signal
 
 
 class FakeStorage:
@@ -107,6 +115,50 @@ def test_protective_exit_take_profit():
     assert eng._protective_exit("ETH-USD", pos, 121.0, 5.0, candles) is not None
     assert "take-profit" in eng._protective_exit("ETH-USD", pos, 121.0, 5.0, candles).lower()
     assert eng._protective_exit("ETH-USD", pos, 119.0, 5.0, candles) is None
+
+
+def _signal(action, price=1000.0, atr=50.0, product="BTC-USD"):
+    return Signal(
+        product_id=product, action=action, price=price,
+        indicators={"atr": atr}, reasons=["test reason"],
+    )
+
+
+def test_manage_codes_no_signal_when_flat_and_holding():
+    eng = make_engine(starting_cash=10_000)
+    # HOLD while flat -> no actionable signal.
+    trade, code = eng._manage(_signal(HOLD), 1000.0, [], prices={})
+    assert trade is None and code == NO_SIGNAL
+    # SELL while flat -> nothing to sell.
+    trade, code = eng._manage(_signal(SELL), 1000.0, [], prices={})
+    assert trade is None and code == NO_POSITION
+
+
+def test_manage_code_size_zero_below_dust_floor():
+    eng = make_engine(starting_cash=5)  # below the $10 dust floor -> qty 0
+    trade, code = eng._manage(_signal(BUY), 1000.0, [], prices={})
+    assert trade is None and code == SIZE_ZERO
+
+
+def test_manage_code_max_open_positions():
+    eng = make_engine(starting_cash=10_000, max_open_positions=1)
+    _open_long(eng, "ETH-USD", price=100.0, qty=1.0)  # fills the one slot
+    trade, code = eng._manage(_signal(BUY, product="BTC-USD"), 1000.0, [], prices={})
+    assert trade is None and code == MAX_OPEN_POSITIONS
+
+
+def test_manage_code_acted_on_buy():
+    eng = make_engine(starting_cash=10_000)
+    trade, code = eng._manage(_signal(BUY), 1000.0, [], prices={})
+    assert trade is not None and code == ACTED
+
+
+def test_manage_code_in_position_when_holding_no_exit():
+    eng = make_engine(starting_cash=10_000, trailing_stop=False)
+    _open_long(eng, "BTC-USD", price=1000.0, qty=1.0)
+    # Price comfortably above the stop and below any target -> hold the position.
+    trade, code = eng._manage(_signal(HOLD, price=1000.0), 1000.0, [], prices={})
+    assert trade is None and code == IN_POSITION
 
 
 def test_trailing_stop_ratchets_up():
