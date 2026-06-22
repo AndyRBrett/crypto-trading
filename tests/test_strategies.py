@@ -79,6 +79,14 @@ def test_rsi_mean_reversion_holds_midrange():
     assert sig.action == HOLD
 
 
+def test_rsi_mean_reversion_hold_records_threshold_distance():
+    s = _rsi_strategy(rsi_mr_oversold=5, rsi_mr_overbought=95)
+    sig = s.generate_signal("BTC-USD", ohlc([(c, c, c) for c in [10, 11, 10, 11, 10, 11]]))
+    th = sig.thresholds
+    assert th["rsi_to_oversold"] == round(sig.indicators["rsi"] - 5, 2)
+    assert th["rsi_to_overbought"] == round(95 - sig.indicators["rsi"], 2)
+
+
 def test_rsi_mean_reversion_insufficient_data_holds():
     s = _rsi_strategy()
     sig = s.generate_signal("BTC-USD", closes([10, 11]))
@@ -118,6 +126,18 @@ def test_donchian_holds_inside_channel():
     rows = [(10, 9, 10)] * 4 + [(10, 9, 9.5)]
     sig = s.generate_signal("BTC-USD", ohlc(rows))
     assert sig.action == HOLD
+
+
+def test_donchian_hold_records_distance_to_channel_edges():
+    s = _donchian()
+    rows = [(10, 9, 10)] * 4 + [(10, 9, 9.5)]
+    sig = s.generate_signal("BTC-USD", ohlc(rows))
+    th = sig.thresholds
+    upper, lower = sig.indicators["donchian_upper"], sig.indicators["donchian_lower"]
+    assert th["breakout_dist_pct"] == round((9.5 - upper) / upper * 100, 3)
+    assert th["exit_dist_pct"] == round((9.5 - lower) / lower * 100, 3)
+    # Inside the channel: not yet broken out (<=0) nor below the exit (>=0).
+    assert th["breakout_dist_pct"] <= 0 and th["exit_dist_pct"] >= 0
 
 
 # -- shared sentiment gating across all strategies --------------------------

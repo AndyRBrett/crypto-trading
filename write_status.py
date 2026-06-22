@@ -32,6 +32,14 @@ Two further enrichments turn raw numbers into evaluable signal:
 * A per-signal decision log (issue #23): ``rejection_reasons`` (a count of why
   evaluated signals didn't trade) and ``avg_slippage_bps`` (realized signal-to-
   fill slippage on the ones that did), so tuning is data-driven instead of guesswork.
+  Each ``hold``/``rejected`` decision also carries the signed ``thresholds`` it
+  logged — how close that signal came to firing — so "6/6 no_signal" is no longer
+  an opaque gap.
+* ``risk_metrics``: Sharpe, Sortino, max drawdown and annualized volatility over a
+  30-day lookback, computed from the persisted equity curve (see ``bot/metrics.py``
+  for the conventions). They scale return against the risk taken to earn it, so a
+  raw P&L number becomes interpretable — is a down month normal variance or a real
+  regression? Omitted when there isn't enough equity history to measure.
 """
 
 from __future__ import annotations
@@ -42,6 +50,8 @@ import json
 import sqlite3
 import time
 from datetime import datetime, timezone
+
+from bot.metrics import RISK_WINDOW_DAYS, risk_metrics
 
 WINDOW_DAYS = 7
 # Longer windows reported alongside the headline 7-day metrics (issue #20).
@@ -64,20 +74,30 @@ def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _aggregate_equity(series: list[list[tuple[float, float]]]) -> list[tuple[float, float]]:
-    """Sum per-store equity snapshots into one portfolio-wide curve.
+def _merge_equity(
+    series: list[list[tuple[float, float]]], clip_to_common_start: bool = False
+) -> list[tuple[float, float]]:
+    """Sum per-store equity snapshots into one full-resolution portfolio curve.
 
     ``series`` is one sorted ``[(timestamp, equity), ...]`` list per store. The
     stores tick independently, so at each observed timestamp we forward-fill each
     store's most recent equity (its last snapshot at-or-before that instant) and
     sum across stores. For the common single-store case this is just that store's
-    own curve. The result is downsampled to ``MAX_EQUITY_POINTS`` (first and last
-    always kept) to keep the status file small.
+    own curve.
+
+    When ``clip_to_common_start`` is set, the curve starts only once *every* store
+    has reported at least once. Before that point the sum understates the book (a
+    store that hasn't ticked yet contributes nothing), which would read as a huge
+    spurious return the first time it comes online — fine for a rough dashboard
+    line, but it would wreck Sharpe/Sortino, so the risk window clips it off.
     """
     series = [s for s in series if s]
     if not series:
         return []
     timestamps = sorted({ts for s in series for ts, _ in s})
+    if clip_to_common_start:
+        common_start = max(s[0][0] for s in series)  # latest first-snapshot
+        timestamps = [ts for ts in timestamps if ts >= common_start]
     ts_lists = [[ts for ts, _ in s] for s in series]
     eq_lists = [[eq for _, eq in s] for s in series]
     curve: list[tuple[float, float]] = []
@@ -88,6 +108,13 @@ def _aggregate_equity(series: list[list[tuple[float, float]]]) -> list[tuple[flo
             if i >= 0:  # store had started by this instant
                 total += el[i]
         curve.append((ts, total))
+    return curve
+
+
+def _aggregate_equity(series: list[list[tuple[float, float]]]) -> list[tuple[float, float]]:
+    """Portfolio-wide equity curve downsampled for the status file's dashboard
+    chart: at most ``MAX_EQUITY_POINTS`` points, first and last always kept."""
+    curve = _merge_equity(series)
     if len(curve) > MAX_EQUITY_POINTS:
         step = (len(curve) - 1) / (MAX_EQUITY_POINTS - 1)
         idxs = sorted({round(k * step) for k in range(MAX_EQUITY_POINTS)})
@@ -107,6 +134,10 @@ def collect_metrics(now: float | None = None) -> dict:
     windows = (WINDOW_DAYS, *EXTRA_WINDOW_DAYS)
     window_starts = {d: now - d * 86_400 for d in windows}
     head_start = window_starts[WINDOW_DAYS]
+    # The risk window (Sharpe/Sortino/drawdown) reaches further back than the
+    # headline 7-day equity curve, so load equity over the longer of the two.
+    risk_start = now - RISK_WINDOW_DAYS * 86_400
+    equity_load_start = min(head_start, risk_start)
     errors: list[str] = []
 
     db_paths = sorted(glob.glob(DB_GLOB))
@@ -128,7 +159,8 @@ def collect_metrics(now: float | None = None) -> dict:
     buy_notional: dict[str, float] = {}            # strategy capital deployed per symbol
     first_mark: dict[str, tuple[float, float]] = {}  # earliest (ts, price) seen per symbol
     last_mark: dict[str, tuple[float, float]] = {}   # latest (ts, price) seen per symbol
-    equity_series: list[list[tuple[float, float]]] = []  # one curve per store
+    equity_series: list[list[tuple[float, float]]] = []  # 7-day curve, per store
+    risk_equity_series: list[list[tuple[float, float]]] = []  # risk window, per store
     # Per-signal decision log for the run that just executed (issue #23).
     decisions: list[dict] = []
 
@@ -156,16 +188,17 @@ def collect_metrics(now: float | None = None) -> dict:
             except sqlite3.Error:
                 sig_rows = []  # older store without signal_log
             decisions += _store_decisions(conn, run_since)
-            equity_series.append(
-                [
-                    (r["timestamp"], r["equity"])
-                    for r in conn.execute(
-                        "SELECT timestamp, equity FROM equity "
-                        "WHERE timestamp >= ? ORDER BY timestamp",
-                        (head_start,),
-                    )
-                ]
-            )
+            store_equity = [
+                (r["timestamp"], r["equity"])
+                for r in conn.execute(
+                    "SELECT timestamp, equity FROM equity "
+                    "WHERE timestamp >= ? ORDER BY timestamp",
+                    (equity_load_start,),
+                )
+            ]
+            risk_equity_series.append(store_equity)
+            # The headline curve is the 7-day tail of the same load.
+            equity_series.append([p for p in store_equity if p[0] >= head_start])
             conn.close()
         except sqlite3.Error as exc:
             errors.append(f"{path}: {exc}")
@@ -232,6 +265,15 @@ def collect_metrics(now: float | None = None) -> dict:
             status["equity_curve"] = [
                 {"t": _iso(ts), "equity": round(eq, 2)} for ts, eq in curve
             ]
+        # Risk-adjusted metrics (Sharpe / Sortino / max drawdown) turn the raw
+        # P&L into something interpretable — is a down month normal variance or a
+        # regression? Computed from the persisted equity curve over a 30-day
+        # lookback; clip the cold-start ramp so a store coming online mid-window
+        # isn't read as a return. Omitted when there isn't enough curve to measure.
+        risk_curve = _merge_equity(risk_equity_series, clip_to_common_start=True)
+        risk = risk_metrics(risk_curve, now=now)
+        if risk:
+            status["risk_metrics"] = risk
     status["signals_evaluated"] = signals_evaluated
     status["signals_acted"] = signals_acted
     # Decision log (issue #23): why each evaluated signal did/didn't trade, and
@@ -264,23 +306,42 @@ def _store_decisions(conn: sqlite3.Connection, run_since: float) -> list[dict]:
     """
     try:
         rows = conn.execute(
-            "SELECT product_id, action, outcome, reject_code, slippage_bps "
+            "SELECT product_id, action, outcome, reject_code, slippage_bps, features "
             "FROM signal_log WHERE timestamp >= ? ORDER BY id",
             (run_since,),
         ).fetchall()
     except sqlite3.Error:
-        return []
+        # Older store without the features column — fall back to the rest.
+        try:
+            rows = conn.execute(
+                "SELECT product_id, action, outcome, reject_code, slippage_bps "
+                "FROM signal_log WHERE timestamp >= ? ORDER BY id",
+                (run_since,),
+            ).fetchall()
+        except sqlite3.Error:
+            return []
     out = []
     for r in rows:
-        out.append(
-            {
-                "product_id": r["product_id"],
-                "action": r["action"],
-                "outcome": r["outcome"] or "hold",
-                "reject_code": r["reject_code"] or "",
-                "slippage_bps": r["slippage_bps"],
-            }
-        )
+        keys = r.keys()
+        decision = {
+            "product_id": r["product_id"],
+            "action": r["action"],
+            "outcome": r["outcome"] or "hold",
+            "reject_code": r["reject_code"] or "",
+            "slippage_bps": r["slippage_bps"],
+        }
+        # Surface how close a HOLD came to firing: the signed distance to each
+        # decision threshold. This is the whole point of the snapshot — "6/6
+        # no_signal" becomes "and here's how near each was". Acted signals already
+        # have a full trade record, so the thresholds are only added on non-acts.
+        if "features" in keys and decision["outcome"] != "acted":
+            try:
+                feats = json.loads(r["features"]) if r["features"] else {}
+            except (ValueError, TypeError):
+                feats = {}
+            if feats.get("thresholds"):
+                decision["thresholds"] = feats["thresholds"]
+        out.append(decision)
     return out
 
 

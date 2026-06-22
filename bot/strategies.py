@@ -135,6 +135,15 @@ class RsiMeanReversionStrategy:
                 f"{c.rsi_mr_overbought:.0f} — no edge, holding."
             )
 
+        # Distance to each trigger: RSI must fall to/below oversold to BUY, or
+        # rise to/above overbought to SELL. Signed gaps make a HOLD legible.
+        thresholds = {
+            # <= 0 once RSI has fallen to the oversold BUY trigger.
+            "rsi_to_oversold": round(rsi_val - c.rsi_mr_oversold, 2),
+            # <= 0 once RSI has risen to the overbought SELL trigger.
+            "rsi_to_overbought": round(c.rsi_mr_overbought - rsi_val, 2),
+        }
+
         action, strength = apply_sentiment(
             action, strength, snapshot, sentiment, c, reasons
         )
@@ -145,6 +154,7 @@ class RsiMeanReversionStrategy:
             indicators=snapshot,
             reasons=reasons,
             strength=round(strength, 2),
+            thresholds=thresholds,
         )
 
 
@@ -219,6 +229,16 @@ class DonchianBreakoutStrategy:
                 f"(${lower:,.2f} – ${upper:,.2f}) — holding."
             )
 
+        # Distance to each channel edge: price breaking above the upper channel
+        # is the BUY trigger, below the lower channel is the SELL/exit. Signed
+        # gaps make a HOLD-inside-the-channel legible (how near a breakout was).
+        thresholds = {
+            # > 0 once price breaks above the entry channel high (BUY).
+            "breakout_dist_pct": round((price - upper) / upper * 100, 3) if upper else 0.0,
+            # < 0 once price breaks below the exit channel low (SELL).
+            "exit_dist_pct": round((price - lower) / lower * 100, 3) if lower else 0.0,
+        }
+
         action, strength = apply_sentiment(
             action, strength, snapshot, sentiment, c, reasons
         )
@@ -229,4 +249,5 @@ class DonchianBreakoutStrategy:
             indicators=snapshot,
             reasons=reasons,
             strength=round(strength, 2),
+            thresholds=thresholds,
         )

@@ -220,9 +220,13 @@ plus 30- and 90-day totals:
                  "buy_hold_pnl": 7.7, "strategy_return_pct": 1.45,
                  "buy_hold_return_pct": 0.8, "alpha_pct": 0.65 },
   "equity_curve": [ { "t": "...Z", "equity": 1000.0 }, { "t": "...Z", "equity": 1014.01 } ],
+  "risk_metrics": { "window_days": 30, "samples": 29, "max_drawdown_pct": 4.20,
+                    "volatility_pct": 31.4, "sharpe": 0.82, "sortino": 1.15 },
   "signals_evaluated": 6, "signals_acted": 2,
-  "decisions": [ { "product_id": "BTC-USD", "action": "BUY", "outcome": "acted",
-                   "reject_code": "", "slippage_bps": 3.1 } ],
+  "decisions": [ { "product_id": "BTC-USD", "action": "HOLD", "outcome": "hold",
+                   "reject_code": "no_signal", "slippage_bps": null,
+                   "thresholds": { "ma_gap_pct": -0.42, "rsi_to_overbought": 21.0,
+                                   "price_to_trend_pct": -1.2, "adx_to_min": -5.0 } } ],
   "rejection_reasons": { "no_signal": 3, "size_zero": 1 }, "avg_slippage_bps": 3.1,
   "last_fill_at": null, "errors": [] }
 ```
@@ -247,6 +251,25 @@ accounts for every evaluated signal: `decisions` lists each one's `outcome`
 (`acted` / `rejected` / `hold`) and `reject_code`, `rejection_reasons` tallies
 why signals didn't trade (e.g. `no_signal`, `size_zero`, `max_open_positions`),
 and `avg_slippage_bps` is the realized signal-to-fill slippage on acted signals.
+Each non-acted decision also carries its `thresholds` — the **signed distance to
+each decision threshold** captured at evaluation time (e.g. `ma_gap_pct: -0.42`
+means the fast MA was 0.42% below the slow MA, so the crossover entry was just
+shy of firing). The full snapshot (indicators + thresholds) is persisted per
+signal in the `signal_log.features` column of each `trading*.db`, so HOLDs are
+queryable for threshold tuning instead of being an invisible gap — the trade log
+only ever records the signals that *did* fire.
+
+`risk_metrics` makes a raw P&L number interpretable by scaling return against the
+risk taken to earn it. Computed from the persisted equity curve over a **30-day
+lookback** (matching the headline `pnl_30d`): `sharpe` and `sortino` are
+annualized with the 365-day, 24/7 crypto convention at a 0% risk-free rate,
+`max_drawdown_pct` is the worst peak-to-trough decline in the window, and
+`volatility_pct` is the annualized standard deviation of daily returns. Equity is
+resampled to one observation per UTC day before the ratios are computed; metrics
+that need dispersion (or, for Sortino, a losing day) are omitted when the curve
+can't support them. See `bot/metrics.py` for the full convention. The dashboard
+renders the same numbers in a "Risk-adjusted metrics" panel, computed client-side
+from the equity curve in `state.json`.
 
 The always-on workflow regenerates and commits it once a day (right after a
 tick, so the trade stores are present), so the monitor always has a fresh

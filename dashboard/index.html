@@ -138,6 +138,12 @@
   </section>
 
   <section>
+    <h2>Risk-adjusted metrics<button class="info-btn inline" data-info="risk_metrics" aria-label="What does this mean?">i</button></h2>
+    <div class="cards" id="risk"></div>
+    <p class="hint" id="riskNote"></p>
+  </section>
+
+  <section>
     <h2>Positions<button class="info-btn inline" data-info="positions" aria-label="What does this mean?">i</button></h2>
     <div id="positions"></div>
   </section>
@@ -285,19 +291,45 @@ function renderSignals(s) {
     }).join("") + `</tbody></table>`;
 }
 
+// Friendly labels for the signed "distance to threshold" snapshot the bot logs
+// on every signal (see bot/strategy.py / bot/strategies.py). A positive/negative
+// gap shows how near a HOLD came to flipping into a trade.
+const THRESH_LABELS = {
+  ma_gap_pct: "fast vs slow MA",
+  rsi_to_overbought: "RSI to overbought",
+  rsi_to_oversold: "RSI to oversold",
+  price_to_trend_pct: "price vs trend",
+  adx_to_min: "ADX vs min",
+  breakout_dist_pct: "to breakout",
+  exit_dist_pct: "to channel low",
+};
+
+function fmtThresholds(th) {
+  return Object.entries(th).map(([k, v]) => {
+    const label = THRESH_LABELS[k] || k;
+    const sign = v >= 0 ? "+" : "";
+    return `${label} ${sign}${v}${k.endsWith("_pct") ? "%" : ""}`;
+  }).join(" · ");
+}
+
 function renderActivity(s) {
   const el = document.getElementById("activity");
   const items = (s.activity || []).filter(a => coinMatch(a.product_id));
   if (!items.length) { el.innerHTML = '<div class="empty">No activity recorded yet.</div>'; return; }
   el.innerHTML = `<table><thead><tr>
       <th>When</th><th>Market</th><th>Decision</th><th>Price</th><th>Why</th>
-    </tr></thead><tbody>` + items.map(a => `<tr>
+    </tr></thead><tbody>` + items.map(a => {
+      const th = a.features && a.features.thresholds;
+      const near = th && Object.keys(th).length
+        ? `<div class="meta">how close: ${fmtThresholds(th)}</div>` : "";
+      return `<tr>
       <td class="when">${ago(a.timestamp)}</td>
       <td>${a.product_id}</td>
       <td><span class="badge ${a.action}">${a.action}</span></td>
       <td class="mono">${fmtUSD(a.price)}</td>
-      <td>${a.reason || ""}</td>
-    </tr>`).join("") + `</tbody></table>`;
+      <td>${a.reason || ""}${near}</td>
+    </tr>`;
+    }).join("") + `</tbody></table>`;
 }
 
 function renderTrades(s) {
@@ -656,10 +688,82 @@ function renderPriceChart(s, coin) {
   legend.innerHTML = lg;
 }
 
+// Risk-adjusted metrics from the equity curve. This mirrors bot/metrics.py —
+// the canonical implementation that writes overseer-status.json — so the
+// dashboard and the overseer report the same numbers. Same conventions: a
+// 30-day lookback, daily resampling (last equity recorded each UTC day), 365-day
+// annualization (crypto trades 24/7), and a risk-free rate of 0.
+const RISK_WINDOW_DAYS = 30;
+const TRADING_DAYS_PER_YEAR = 365;
+
+function dailyLastEquity(curve) {
+  const byDay = new Map();
+  for (const p of curve) {
+    if (!p.timestamp) continue;
+    const day = new Date(p.timestamp * 1000).toISOString().slice(0, 10);
+    byDay.set(day, p.equity);  // a later snapshot the same day overwrites it
+  }
+  return [...byDay.keys()].sort().map(d => byDay.get(d));
+}
+
+function riskMetrics(curve) {
+  if (!curve || curve.length < 2) return null;
+  const start = Date.now() / 1000 - RISK_WINDOW_DAYS * 86400;
+  const win = curve.filter(p => (p.timestamp || 0) >= start);
+  if (win.length < 2) return null;
+  // Max drawdown: worst peak-to-trough decline over the full-resolution window.
+  let peak = null, worst = 0;
+  for (const p of win) {
+    if (peak === null || p.equity > peak) peak = p.equity;
+    if (peak > 0) { const dd = p.equity / peak - 1; if (dd < worst) worst = dd; }
+  }
+  const out = { window_days: RISK_WINDOW_DAYS, max_drawdown_pct: Math.abs(worst) * 100 };
+  // Daily simple returns from the resampled curve.
+  const eqs = dailyLastEquity(win);
+  const rets = [];
+  for (let i = 1; i < eqs.length; i++) if (eqs[i - 1] > 0) rets.push(eqs[i] / eqs[i - 1] - 1);
+  out.samples = rets.length;
+  if (rets.length >= 2) {
+    const ann = Math.sqrt(TRADING_DAYS_PER_YEAR);
+    const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+    const variance = rets.reduce((a, b) => a + (b - mean) ** 2, 0) / (rets.length - 1);
+    const sd = Math.sqrt(variance);
+    out.volatility_pct = sd * ann * 100;
+    if (sd > 0) out.sharpe = mean / sd * ann;
+    const downside = Math.sqrt(rets.reduce((a, b) => a + Math.min(b, 0) ** 2, 0) / rets.length);
+    if (downside > 0) out.sortino = mean / downside * ann;
+  }
+  return out;
+}
+
+function renderRisk(s) {
+  const el = document.getElementById("risk");
+  const note = document.getElementById("riskNote");
+  if (!el) return;
+  const m = riskMetrics(s.equity_curve);
+  if (!m || m.samples < 2) {
+    el.innerHTML = '<div class="empty">Not enough equity history yet — risk metrics need a couple of days of daily snapshots.</div>';
+    if (note) note.textContent = "";
+    return;
+  }
+  const ratio = (v) => v == null ? "—" : v.toFixed(2);
+  const dd = m.max_drawdown_pct > 0 ? "-" + m.max_drawdown_pct.toFixed(2) + "%" : "0.00%";
+  el.innerHTML = [
+    card("Sharpe", ratio(m.sharpe), m.sharpe == null ? "" : cls(m.sharpe), "sharpe"),
+    card("Sortino", ratio(m.sortino), m.sortino == null ? "" : cls(m.sortino), "sortino"),
+    card("Max drawdown", dd, m.max_drawdown_pct > 0 ? "neg" : "", "max_drawdown"),
+    card("Volatility (ann.)", m.volatility_pct == null ? "—" : m.volatility_pct.toFixed(2) + "%", "", "volatility"),
+  ].join("");
+  if (note) {
+    note.textContent =
+      `Annualized, risk-free 0%, ${m.window_days}-day lookback · based on ${m.samples} daily return${m.samples === 1 ? "" : "s"}.`;
+  }
+}
+
 function renderAll(s) {
   document.getElementById("updated").textContent = "updated " + ago(s.updated_at);
   renderSummary(s);
-  renderCards(s); renderFilter(s); renderMainChart(s);
+  renderCards(s); renderFilter(s); renderMainChart(s); renderRisk(s);
   renderPositions(s); renderSignals(s); renderActivity(s); renderTrades(s);
 }
 
@@ -682,9 +786,14 @@ const INFO = {
   adx: { title: "ADX", body: "Average Directional Index (0–100) — how strong the trend is, regardless of direction.", eg: "<b>12</b> = choppy, sit out; <b>35</b> = strong trend." },
   sentiment: { title: "Sentiment", body: "Optional news-mood score. Negative news can veto a buy or trigger a risk-off sell.", eg: "<b>Negative (−0.6)</b> → skip an otherwise-valid buy." },
   chart: { title: "Main chart", body: "With “All” selected this is your equity (account value) over time — the dashed line marks where you started. Pick a coin to switch it to that coin's 1-hour price candles with the moving averages drawn on top." },
+  risk_metrics: { title: "Risk-adjusted metrics", body: "Scales return against the risk taken to earn it, so a dollar P&L becomes interpretable — is a down stretch normal variance or a real regression? Computed from the equity curve over a 30-day lookback, annualized 24/7, risk-free 0." },
+  sharpe: { title: "Sharpe ratio", body: "Average daily return divided by its volatility, annualized. Higher is better; it rewards smooth gains and penalizes a bumpy ride.", eg: "<b>&gt; 1</b> is solid, <b>&lt; 0</b> means you lost money on average." },
+  sortino: { title: "Sortino ratio", body: "Like Sharpe, but it only counts <em>downside</em> volatility — upside swings don't count against you. Blank until there's been a losing day.", eg: "A high Sortino with a lower Sharpe = gains are choppy but drawdowns are gentle." },
+  max_drawdown: { title: "Max drawdown", body: "The deepest peak-to-trough drop in account value over the window — the worst it felt to hold through.", eg: "Equity fell from $11,000 to $9,900 → <b>-10%</b>." },
+  volatility: { title: "Volatility (annualized)", body: "How much daily returns swing around, scaled to a yearly figure. Lower means a steadier curve." },
   positions: { title: "Positions", body: "Coins the account holds right now, with their live value and paper (unrealized) profit or loss." },
   signals: { title: "Latest signals", body: "The newest reading and decision for each market the bot watches. Tap the ⓘ on any column to learn what that indicator means." },
-  activity: { title: "Activity log", body: "Every check the bot makes — including HOLDs — so you can see it's alive and watching the market." },
+  activity: { title: "Activity log", body: "Every check the bot makes — including HOLDs — so you can see it's alive and watching the market. The “how close” line shows the signed distance from each decision threshold, so you can tell how near a HOLD came to firing." },
   trades: { title: "Trade log", body: "Each completed buy and sell with a plain-English reason. The meta line shows the indicators at that moment, including ATR — the volatility measure used to size the trade and place its stop-loss." },
 };
 

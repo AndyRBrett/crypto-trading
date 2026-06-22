@@ -96,3 +96,33 @@ def test_adx_filter_blocks_chop():
     sig = s.generate_signal("BTC-USD", ohlc(closes))
     assert sig.action == HOLD
     assert "adx" in sig.indicators
+
+
+def test_hold_carries_distance_to_each_threshold():
+    # A HOLD must still record how close it came to firing, so a no_signal can be
+    # tuned rather than being an opaque gap.
+    s = make_strategy(rsi_overbought=95.0, trend_filter=True, trend_period=3,
+                      adx_filter=True, adx_period=3, adx_min=60.0)
+    sig = s.generate_signal("BTC-USD", ohlc([10, 11, 10, 11, 10, 11, 10, 9, 12]))
+    assert sig.action == HOLD
+    th = sig.thresholds
+    # The four entry gates each get a signed distance to where they'd flip.
+    assert "ma_gap_pct" in th
+    assert "rsi_to_overbought" in th
+    assert "price_to_trend_pct" in th
+    assert "adx_to_min" in th
+    # ma_gap_pct is the signed % gap between the fast and slow MA.
+    expected_gap = round(
+        (sig.indicators["fast_sma"] - sig.indicators["slow_sma"])
+        / sig.indicators["slow_sma"] * 100, 3
+    )
+    assert th["ma_gap_pct"] == expected_gap
+    # adx_to_min is ADX minus the floor; it's negative here (chop blocked it).
+    assert th["adx_to_min"] == round(sig.indicators["adx"] - 60.0, 2)
+
+
+def test_thresholds_omit_filters_that_are_off():
+    s = make_strategy(trend_filter=False, adx_filter=False)
+    sig = s.generate_signal("BTC-USD", candles([10, 11, 10, 11, 10, 11]))
+    assert "price_to_trend_pct" not in sig.thresholds
+    assert "adx_to_min" not in sig.thresholds

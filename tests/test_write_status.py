@@ -137,6 +137,57 @@ def test_decision_log_and_rejection_reasons(tmp_path):
     assert status["avg_slippage_bps"] == 20.0
 
 
+def test_risk_metrics_from_equity_curve(tmp_path):
+    now = 2_000_000_000.0
+    day = 86_400
+    s = Storage(os.path.join(str(tmp_path), "trading.risk.db"))
+    # Daily equity snapshots over a week: a wobble with one losing day, so all of
+    # Sharpe / Sortino / max drawdown are defined.
+    eqs = [10_000, 10_100, 10_050, 10_200, 10_150, 10_300, 10_250, 10_400]
+    for i, eq in enumerate(eqs):
+        s.conn.execute(
+            "INSERT INTO equity(timestamp, cash, market_value, equity) VALUES (?,?,?,?)",
+            (now - (len(eqs) - i) * day, eq, 0.0, eq),
+        )
+    s.conn.commit()
+    s.close()
+    os.chdir(str(tmp_path))
+
+    rm = write_status.collect_metrics(now)["risk_metrics"]
+    assert rm["window_days"] == 30
+    assert rm["samples"] == len(eqs) - 1
+    assert "sharpe" in rm and "sortino" in rm
+    # Worst peak-to-trough is 10,100 -> 10,050 (each dip recovers to a new high).
+    assert rm["max_drawdown_pct"] == round(abs(10_050 / 10_100 - 1) * 100, 2)
+
+
+def test_no_risk_metrics_without_enough_equity(tmp_path):
+    now = 2_000_000_000.0
+    s = Storage(os.path.join(str(tmp_path), "trading.thin.db"))
+    s.conn.execute(
+        "INSERT INTO equity(timestamp, cash, market_value, equity) VALUES (?,?,?,?)",
+        (now - 86_400, 10_000.0, 0.0, 10_000.0),
+    )
+    s.conn.commit()
+    s.close()
+    os.chdir(str(tmp_path))
+    # A single snapshot isn't enough to measure variance -> metric omitted.
+    assert "risk_metrics" not in write_status.collect_metrics(now)
+
+
+def test_decisions_surface_threshold_distance_on_hold(tmp_path):
+    now = 2_000_000_000.0
+    s = Storage(os.path.join(str(tmp_path), "trading.thr.db"))
+    s.save_signal(
+        now - 60, "BTC-USD", "HOLD", 100.0, "no crossover", outcome="hold",
+        features={"thresholds": {"ma_gap_pct": -0.5, "rsi_to_overbought": 21.0}},
+    )
+    s.close()
+    os.chdir(str(tmp_path))
+    decisions = write_status.collect_metrics(now)["decisions"]
+    assert decisions[0]["thresholds"] == {"ma_gap_pct": -0.5, "rsi_to_overbought": 21.0}
+
+
 def test_missing_store_is_an_error(tmp_path):
     os.chdir(str(tmp_path))
     status = write_status.collect_metrics(1_700_000_000.0)

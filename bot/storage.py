@@ -108,7 +108,8 @@ class Storage:
                 reason TEXT NOT NULL,
                 outcome TEXT NOT NULL DEFAULT '',
                 reject_code TEXT NOT NULL DEFAULT '',
-                slippage_bps REAL
+                slippage_bps REAL,
+                features TEXT NOT NULL DEFAULT '{}'
             );
             """
         )
@@ -120,14 +121,17 @@ class Storage:
 
         ``CREATE TABLE IF NOT EXISTS`` leaves an existing signal_log on its old
         schema, so the decision-log columns (issue #23 — why a signal didn't
-        trade, plus realized slippage) are added in place when missing. Cheap and
-        idempotent: every run checks, only the first one alters.
+        trade, plus realized slippage) and the later ``features`` snapshot column
+        (input features + distance to each decision threshold, for tuning) are
+        added in place when missing. Cheap and idempotent: every run checks, only
+        the first one alters.
         """
         cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(signal_log)")}
         for col, ddl in (
             ("outcome", "ALTER TABLE signal_log ADD COLUMN outcome TEXT NOT NULL DEFAULT ''"),
             ("reject_code", "ALTER TABLE signal_log ADD COLUMN reject_code TEXT NOT NULL DEFAULT ''"),
             ("slippage_bps", "ALTER TABLE signal_log ADD COLUMN slippage_bps REAL"),
+            ("features", "ALTER TABLE signal_log ADD COLUMN features TEXT NOT NULL DEFAULT '{}'"),
         ):
             if col not in cols:
                 self.conn.execute(ddl)
@@ -158,6 +162,7 @@ class Storage:
         outcome: str = "",
         reject_code: str = "",
         slippage_bps: float | None = None,
+        features: dict | None = None,
     ) -> None:
         """Record one evaluated signal.
 
@@ -166,22 +171,37 @@ class Storage:
         the overseer can account for every evaluated signal instead of guessing.
         ``slippage_bps`` is the realized gap between the signal price and the fill
         price on acted signals (``None`` when nothing filled).
+
+        ``features`` is the per-signal snapshot — the input indicators and, most
+        usefully on a HOLD/no_signal, the signed distance to each decision
+        threshold (how close it came to firing). Stored as JSON so the whole
+        thing is queryable for threshold tuning; defaults to ``{}``.
         """
         self.conn.execute(
             "INSERT INTO signal_log(timestamp, product_id, action, price, reason, "
-            "outcome, reject_code, slippage_bps) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-            (timestamp, product_id, action, price, reason, outcome, reject_code, slippage_bps),
+            "outcome, reject_code, slippage_bps, features) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (timestamp, product_id, action, price, reason, outcome, reject_code,
+             slippage_bps, json.dumps(features or {})),
         )
         self.conn.commit()
 
     def load_activity(self, limit: int = 60) -> list[dict]:
         rows = self.conn.execute(
             "SELECT timestamp, product_id, action, price, reason, "
-            "outcome, reject_code, slippage_bps "
+            "outcome, reject_code, slippage_bps, features "
             "FROM signal_log ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["features"] = json.loads(d["features"]) if d["features"] else {}
+            except (ValueError, TypeError):
+                d["features"] = {}
+            out.append(d)
+        return out
 
     # -- trades ------------------------------------------------------------
 

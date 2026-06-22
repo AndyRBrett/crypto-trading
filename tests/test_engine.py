@@ -161,6 +161,59 @@ def test_manage_code_in_position_when_holding_no_exit():
     assert trade is None and code == IN_POSITION
 
 
+class RecordingStorage(FakeStorage):
+    def __init__(self):
+        super().__init__()
+        self.signals = []
+
+    def save_signal(self, *a, **k):
+        self.signals.append((a, k))
+
+
+class FakeMarketData:
+    def __init__(self, candles):
+        self._candles = candles
+
+    def get_candles(self, product_id):
+        return self._candles
+
+
+class FakeStrategy:
+    def __init__(self, signal):
+        self._signal = signal
+
+    def generate_signal(self, product_id, candles, sentiment=None):
+        return self._signal
+
+
+def test_tick_logs_feature_snapshot_on_hold():
+    # A HOLD must still persist the input features + distance-to-threshold
+    # snapshot, since the trade log only ever captures signals that fired.
+    candles = [
+        {"time": i, "open": 100, "high": 101, "low": 99, "close": 100}
+        for i in range(5)
+    ]
+    eng = make_engine(starting_cash=10_000, products=["BTC-USD"])
+    rec = RecordingStorage()
+    eng.storage = rec
+    eng.market_data = FakeMarketData(candles)
+    eng.strategy = FakeStrategy(
+        Signal(
+            product_id="BTC-USD", action=HOLD, price=100.0,
+            indicators={"atr": 5.0, "rsi": 48.0},
+            thresholds={"ma_gap_pct": -0.4, "rsi_to_overbought": 22.0},
+        )
+    )
+    eng.tick()
+
+    assert rec.signals, "tick should have logged the evaluated signal"
+    _args, kwargs = rec.signals[0]
+    feats = kwargs["features"]
+    assert feats["thresholds"] == {"ma_gap_pct": -0.4, "rsi_to_overbought": 22.0}
+    assert feats["indicators"]["rsi"] == 48.0
+    assert kwargs["outcome"] == "hold"
+
+
 def test_trailing_stop_ratchets_up():
     # Price ran up to a high of 1500; trailing stop = 1500 - 2*50 = 1400.
     # Take-profit set far away so the trailing stop is what's under test.

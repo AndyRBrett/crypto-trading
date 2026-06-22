@@ -197,11 +197,21 @@ class Engine:
             else:
                 outcome = "rejected" if reject_code in _REJECTED_CODES else "hold"
                 slippage_bps = None
+            # Snapshot the input features + distance to each decision threshold.
+            # On a HOLD/no_signal this is the only record of *how close* the signal
+            # came to firing — exactly what threshold tuning needs, since the
+            # trade log only ever captures the signals that did fire.
+            features = {
+                "indicators": signal.indicators,
+                "thresholds": signal.thresholds,
+                "strength": signal.strength,
+            }
             try:
                 self.storage.save_signal(
                     time.time(), product_id, signal.action, price,
                     signal.reasons[0] if signal.reasons else "",
                     outcome=outcome, reject_code=reject_code, slippage_bps=slippage_bps,
+                    features=features,
                 )
             except Exception as exc:  # never let logging break a tick
                 log.warning("could not record activity for %s: %s", product_id, exc)

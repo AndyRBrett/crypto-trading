@@ -40,6 +40,11 @@ class Signal:
     indicators: dict = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
     strength: float = 0.0  # 0..1, rough confidence for display
+    # Signed distance from each decision threshold to the value that would fire
+    # it (see each strategy's generate_signal). On a HOLD this is *how close* the
+    # signal came to triggering — the input the engine persists for threshold
+    # tuning. Empty for the "not enough data" early return.
+    thresholds: dict = field(default_factory=dict)
 
 
 def apply_sentiment(action, strength, snapshot, sentiment, config, reasons):
@@ -244,6 +249,23 @@ class Strategy:
                 f"No crossover. Fast MA {trend_word} slow MA; RSI {rsi_val:.1f} is neutral."
             )
 
+        # Distance from each entry gate to the point where it would flip. A BUY
+        # needs all four: fast above slow, RSI below overbought, price above the
+        # trend MA, and ADX at/above its floor. The signed gaps make a HOLD
+        # legible — you can see *which* gate was closest to firing and tune it.
+        thresholds = {
+            # >= 0 once the fast MA is at/above the slow MA (the entry trigger).
+            "ma_gap_pct": round((fast - slow) / slow * 100, 3) if slow else 0.0,
+            # > 0 means RSI has room below overbought (gate open).
+            "rsi_to_overbought": round(c.rsi_overbought - rsi_val, 2),
+        }
+        if trend_ma is not None and trend_ma > 0:
+            # > 0 means price is above the trend filter (with the trend).
+            thresholds["price_to_trend_pct"] = round((price - trend_ma) / trend_ma * 100, 3)
+        if adx_val is not None:
+            # >= 0 means the trend is strong enough to clear the chop filter.
+            thresholds["adx_to_min"] = round(adx_val - c.adx_min, 2)
+
         # Fold in news sentiment, if available. Sentiment confirms or vetoes the
         # price-based decision; it never invents a BUY on its own.
         action, strength = apply_sentiment(
@@ -257,4 +279,5 @@ class Strategy:
             indicators=snapshot,
             reasons=reasons,
             strength=round(strength, 2),
+            thresholds=thresholds,
         )

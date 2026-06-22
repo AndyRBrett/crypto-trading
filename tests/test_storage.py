@@ -45,6 +45,23 @@ def test_save_signal_defaults_stay_backward_compatible():
     s.save_signal(1.0, "BTC-USD", "HOLD", 100.0, "no crossover")  # legacy 5-arg call
     act = s.load_activity()[0]
     assert act["outcome"] == "" and act["reject_code"] == "" and act["slippage_bps"] is None
+    assert act["features"] == {}  # parsed back as an empty dict, not the raw "{}"
+    s.close()
+
+
+def test_signal_log_persists_feature_snapshot():
+    tmp = tempfile.mkdtemp()
+    s = Storage(os.path.join(tmp, "t.db"))
+    feats = {
+        "indicators": {"rsi": 48.0, "atr": 12.3},
+        "thresholds": {"ma_gap_pct": -0.42, "rsi_to_overbought": 22.0},
+        "strength": 0.0,
+    }
+    s.save_signal(1.0, "BTC-USD", "HOLD", 100.0, "no crossover", features=feats)
+    act = s.load_activity()[0]
+    # The whole snapshot round-trips as structured JSON, queryable for tuning.
+    assert act["features"]["thresholds"]["ma_gap_pct"] == -0.42
+    assert act["features"]["indicators"]["rsi"] == 48.0
     s.close()
 
 
@@ -70,10 +87,13 @@ def test_migrates_legacy_signal_log_without_decision_columns():
     # Opening through Storage migrates the table in place; old rows survive and
     # new writes carry the decision-log fields.
     s = Storage(db)
-    s.save_signal(2.0, "ETH-USD", "BUY", 50.0, "new row", outcome="acted", slippage_bps=3.0)
+    s.save_signal(2.0, "ETH-USD", "BUY", 50.0, "new row", outcome="acted", slippage_bps=3.0,
+                  features={"thresholds": {"ma_gap_pct": 0.1}})
     acts = s.load_activity()
     assert acts[1]["reason"] == "old row" and acts[1]["outcome"] == ""
+    assert acts[1]["features"] == {}  # migrated old row backfills the default
     assert acts[0]["outcome"] == "acted" and acts[0]["slippage_bps"] == 3.0
+    assert acts[0]["features"]["thresholds"]["ma_gap_pct"] == 0.1
     s.close()
 
 
