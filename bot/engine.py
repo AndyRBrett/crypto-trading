@@ -246,9 +246,11 @@ class Engine:
     def _manage(self, signal, price: float, candles: list, prices: dict):
         """Risk-managed action for one product.
 
-        While holding: protective exits (stop / take-profit / trailing) take
-        priority, then a strategy SELL. While flat: a strategy BUY, sized by
-        volatility so each trade risks a fixed fraction of equity.
+        While holding a long: protective exits (stop / take-profit / trailing)
+        take priority, then a strategy SELL closes it. While holding a short:
+        protective exits, then a strategy BUY covers it. While flat: a strategy
+        BUY opens a long, and — when the account enables shorting — a strategy
+        SELL opens a short. Sizes risk a fixed fraction of equity.
 
         Returns ``(trade_or_None, reject_code)`` where ``reject_code`` is a stable
         enum (``ACTED`` when a trade executed) recording why a signal didn't
@@ -258,7 +260,7 @@ class Engine:
         pos = self.portfolio.position(product_id)
         atr = signal.indicators.get("atr")
 
-        if pos.quantity > 0:
+        if pos.quantity > 0:  # holding a long
             exit_reason = self._protective_exit(product_id, pos, price, atr, candles)
             if exit_reason is None and signal.action == SELL:
                 exit_reason = "; ".join(signal.reasons)
@@ -267,10 +269,18 @@ class Engine:
                 return trade, ACTED if trade else IN_POSITION
             return None, IN_POSITION
 
+        if pos.quantity < 0:  # holding a short — cover on a stop or a BUY signal
+            exit_reason = self._protective_exit(product_id, pos, price, atr, candles)
+            if exit_reason is None and signal.action == BUY:
+                exit_reason = "; ".join(signal.reasons)
+            if exit_reason:
+                trade = self._cover(product_id, price, -pos.quantity, [exit_reason], signal.indicators)
+                return trade, ACTED if trade else IN_POSITION
+            return None, IN_POSITION
+
         if signal.action == BUY:
-            open_count = sum(1 for p in self.portfolio.positions.values() if p.quantity > 0)
-            if open_count >= self.config.max_open_positions:
-                log.info("%s: at max open positions (%d), skipping BUY", product_id, open_count)
+            if self._at_max_positions():
+                log.info("%s: at max open positions, skipping BUY", product_id)
                 return None, MAX_OPEN_POSITIONS
             qty = self._position_size(price, atr, prices)
             if qty <= 0:
@@ -279,21 +289,53 @@ class Engine:
             trade = self._buy(product_id, price, qty, signal.reasons, signal.indicators)
             return trade, ACTED if trade else INSUFFICIENT_BALANCE
 
+        if signal.action == SELL and getattr(self.config, "allow_short", False):
+            if self._at_max_positions():
+                log.info("%s: at max open positions, skipping SHORT", product_id)
+                return None, MAX_OPEN_POSITIONS
+            qty = self._position_size(price, atr, prices, direction="short")
+            if qty <= 0:
+                log.info("%s: short size ~0 after risk limits, skipping", product_id)
+                return None, SIZE_ZERO
+            trade = self._short(product_id, price, qty, signal.reasons, signal.indicators)
+            return trade, ACTED if trade else INSUFFICIENT_BALANCE
+
         return None, NO_POSITION if signal.action == SELL else NO_SIGNAL
 
+    def _at_max_positions(self) -> bool:
+        """True once the portfolio holds the max concurrent positions (either
+        direction counts toward the heat cap)."""
+        open_count = sum(1 for p in self.portfolio.positions.values() if p.quantity != 0)
+        return open_count >= self.config.max_open_positions
+
     def _protective_exit(self, product_id, pos, price, atr, candles):
-        """Return an exit reason if a stop/target/trailing level is breached."""
+        """Return an exit reason if a stop/target/trailing level is breached.
+
+        Direction is read from the position's sign: a short trails the lowest low
+        since entry and stops out *above* entry, the mirror of a long.
+        """
         opened = self.portfolio.opened_at(product_id)
+        if pos.quantity < 0:
+            lows = [
+                c["low"] for c in candles
+                if "low" in c and (opened is None or c.get("time", 0) >= opened)
+            ]
+            return risk.protective_exit_reason(
+                self.config, pos.avg_price, price, atr,
+                lows_since_entry=lows, direction="short",
+            )
         highs = [
             c["high"] for c in candles
             if "high" in c and (opened is None or c.get("time", 0) >= opened)
         ]
         return risk.protective_exit_reason(self.config, pos.avg_price, price, atr, highs)
 
-    def _position_size(self, price, atr, prices):
+    def _position_size(self, price, atr, prices, direction="long"):
         """Volatility-based size so the stop distance risks ~risk_per_trade_pct."""
         equity = self.portfolio.cash + self.portfolio.market_value(prices)
-        return risk.position_size(self.config, equity, self.portfolio.cash, price, atr)
+        return risk.position_size(
+            self.config, equity, self.portfolio.cash, price, atr, direction=direction
+        )
 
     def _buy(self, product_id, price, qty, reasons, indicators):
         try:
@@ -315,6 +357,29 @@ class Engine:
             return None
         return self._finalize(trade, price)
 
+    def _short(self, product_id, price, qty, reasons, indicators):
+        """Open a short: a SELL while flat credits cash and leaves a negative
+        position the engine later covers."""
+        try:
+            trade = self.portfolio.execute(
+                SELL, product_id, price, qty, reasons=reasons, indicators=indicators
+            )
+        except InsufficientPosition as exc:
+            log.warning("%s: %s", product_id, exc)
+            return None
+        return self._finalize(trade, price)
+
+    def _cover(self, product_id, price, qty, reasons, indicators):
+        """Cover a short: a BUY that buys the position back to flat."""
+        try:
+            trade = self.portfolio.execute(
+                BUY, product_id, price, qty, reasons=reasons, indicators=indicators
+            )
+        except (InsufficientFunds, InsufficientPosition) as exc:
+            log.warning("%s: %s", product_id, exc)
+            return None
+        return self._finalize(trade, price)
+
     def _notif_prefix(self) -> str:
         """`[name] ` tag for multi-account push notifications; empty for the
         single-account/default path so legacy alerts read exactly as before."""
@@ -327,13 +392,16 @@ class Engine:
         )
         self.storage.save_trade(trade)
         log.info("EXECUTED %s | %s", trade.side, trade.explanation)
-        if trade.side == SELL and trade.realized_pnl > 0:
+        # Realized P&L is non-zero only on a closing leg — a SELL closing a long
+        # or a BUY covering a short — so this fires on either kind of win.
+        if trade.realized_pnl > 0:
             notional = trade.price * trade.quantity
             pct = (trade.realized_pnl / notional) * 100 if notional > 0 else 0
+            verb = "Covered" if trade.side == BUY else "Sold"
             self.notifier.send(
                 title=f"{self._notif_prefix()}Profit: {trade.product_id} +${trade.realized_pnl:,.2f}",
                 message=(
-                    f"Sold {trade.quantity:.6g} {trade.product_id} @ ${trade.price:,.2f}\n"
+                    f"{verb} {trade.quantity:.6g} {trade.product_id} @ ${trade.price:,.2f}\n"
                     f"Profit: +${trade.realized_pnl:,.2f} ({pct:.1f}% of notional)\n"
                     f"{trade.explanation}"
                 ),

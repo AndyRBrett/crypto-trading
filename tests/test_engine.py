@@ -161,6 +161,46 @@ def test_manage_code_in_position_when_holding_no_exit():
     assert trade is None and code == IN_POSITION
 
 
+def _open_short(eng, product, price, qty):
+    eng.portfolio.execute(SELL, product, price, qty, timestamp=time.time() - 100)
+
+
+def test_manage_sell_while_flat_opens_short_when_allowed():
+    eng = make_engine(starting_cash=10_000, allow_short=True)
+    trade, code = eng._manage(_signal(SELL), 1000.0, [], prices={})
+    assert trade is not None and code == ACTED
+    assert eng.portfolio.position("BTC-USD").quantity < 0  # a short was opened
+
+
+def test_manage_sell_while_flat_does_nothing_when_short_disabled():
+    # Default (long-only) behavior is unchanged: a SELL while flat is a no-op.
+    eng = make_engine(starting_cash=10_000, allow_short=False)
+    trade, code = eng._manage(_signal(SELL), 1000.0, [], prices={})
+    assert trade is None and code == NO_POSITION
+
+
+def test_protective_exit_short_stops_out_above_entry():
+    eng = make_engine(stop_loss_atr_mult=2.0, trailing_stop=False, allow_short=True)
+    _open_short(eng, "BTC-USD", price=1000.0, qty=1.0)
+    pos = eng.portfolio.position("BTC-USD")
+    candles = [{"time": 0, "high": 1010, "low": 990}]
+    # Short stop = entry + 2*ATR = 1000 + 100 = 1100. Above it -> cover.
+    reason = eng._protective_exit("BTC-USD", pos, price=1105.0, atr=50.0, candles=candles)
+    assert reason and "stop-loss" in reason.lower()
+    # Below the stop -> hold the short.
+    assert eng._protective_exit("BTC-USD", pos, 1095.0, 50.0, candles) is None
+
+
+def test_manage_covers_short_on_buy_signal():
+    eng = make_engine(starting_cash=10_000, trailing_stop=False, allow_short=True,
+                      take_profit_atr_mult=100.0)
+    _open_short(eng, "BTC-USD", price=1000.0, qty=1.0)
+    # A BUY while short, with no stop breached, covers via the strategy signal.
+    trade, code = eng._manage(_signal(BUY, price=950.0), 950.0, [], prices={})
+    assert trade is not None and code == ACTED
+    assert eng.portfolio.position("BTC-USD").quantity == 0
+
+
 class RecordingStorage(FakeStorage):
     def __init__(self):
         super().__init__()

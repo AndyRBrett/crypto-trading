@@ -73,6 +73,7 @@ def run_backtest(
     # difference between a multi-minute sweep and a few seconds.
     window_cap = max(min_c, int(getattr(config, "candle_count", 300) or 300))
 
+    allow_short = bool(getattr(config, "allow_short", False))
     peak_equity = config.starting_cash
     max_dd = 0.0
 
@@ -88,7 +89,7 @@ def run_backtest(
         atr = signal.indicators.get("atr")
         pos = portfolio.position(product_id)
 
-        if pos.quantity > 0:
+        if pos.quantity > 0:  # holding a long
             opened = portfolio.opened_at(product_id)
             highs = [
                 c["high"] for c in window
@@ -101,12 +102,34 @@ def run_backtest(
                 portfolio.execute(
                     SELL, product_id, price, pos.quantity, timestamp=ts, reasons=[reason]
                 )
+        elif pos.quantity < 0:  # holding a short — cover on a stop or a BUY
+            opened = portfolio.opened_at(product_id)
+            lows = [
+                c["low"] for c in window
+                if "low" in c and (opened is None or c.get("time", 0) >= opened)
+            ]
+            reason = risk.protective_exit_reason(
+                config, pos.avg_price, price, atr, lows_since_entry=lows, direction="short"
+            )
+            if reason is None and signal.action == BUY:
+                reason = "; ".join(signal.reasons)
+            if reason:
+                portfolio.execute(
+                    BUY, product_id, price, -pos.quantity, timestamp=ts, reasons=[reason]
+                )
         elif signal.action == BUY:
             equity = portfolio.total_equity(prices)
             qty = risk.position_size(config, equity, portfolio.cash, price, atr)
             if qty > 0:
                 portfolio.execute(
                     BUY, product_id, price, qty, timestamp=ts, reasons=signal.reasons
+                )
+        elif signal.action == SELL and allow_short:
+            equity = portfolio.total_equity(prices)
+            qty = risk.position_size(config, equity, portfolio.cash, price, atr, direction="short")
+            if qty > 0:
+                portfolio.execute(
+                    SELL, product_id, price, qty, timestamp=ts, reasons=signal.reasons
                 )
 
         equity = portfolio.total_equity(prices)
@@ -124,7 +147,16 @@ def run_backtest(
     buy_hold_return_pct = (last_price / bench_start - 1) * 100 if bench_start else 0.0
 
     fees_paid = sum(t.fee for t in portfolio.trades)
-    exits = [t for t in portfolio.trades if t.side == SELL]
+    # A round-trip "exit" is any fill that reduces an open position toward zero —
+    # a SELL closing a long or a BUY covering a short. Replaying the signed
+    # position makes this direction-agnostic (long-only reduces to "every SELL").
+    exits = []
+    running = 0.0
+    for t in sorted(portfolio.trades, key=lambda x: x.timestamp):
+        signed = t.quantity if t.side == BUY else -t.quantity
+        if running != 0 and ((running > 0) != (signed > 0)):
+            exits.append(t)
+        running += signed
     wins = sum(1 for t in exits if t.realized_pnl > 0)
     losses = sum(1 for t in exits if t.realized_pnl < 0)
     gross_win = sum(t.realized_pnl for t in exits if t.realized_pnl > 0)

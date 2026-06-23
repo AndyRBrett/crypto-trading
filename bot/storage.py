@@ -282,13 +282,16 @@ class Storage:
         """
         positions = []
         for pid, pos in portfolio.positions.items():
-            if pos.quantity <= 0:
+            if pos.quantity == 0:
                 continue
             price = prices.get(pid, pos.avg_price)
+            # Signed quantity carries the direction; (price - avg) * quantity is
+            # the unrealized P&L for a long or a short alike.
             positions.append(
                 {
                     "product_id": pid,
                     "quantity": pos.quantity,
+                    "side": "short" if pos.quantity < 0 else "long",
                     "avg_price": pos.avg_price,
                     "price": price,
                     "value": pos.quantity * price,

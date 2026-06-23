@@ -313,6 +313,13 @@ behavior. `strategy_type` selects the algorithm from the registry in
 - `ema_crossover` — trend-following EMA crossover (the original/default).
 - `rsi_mean_reversion` — counter-trend: buy oversold RSI, sell back toward the mean.
 - `donchian_breakout` — breakout: buy new N-bar highs, exit on M-bar lows.
+- `trend_long_short` — symmetric EMA trend follower that can **short** confirmed
+  downtrends as well as go long uptrends. The only sleeve that can make money
+  while the market falls instead of sitting in cash. Needs `allow_short: true`.
+- `regime` — stay-invested regime filter: hold a long while price is above the
+  long-term trend MA (200-day by default), move to cash on a break below it.
+  Built to recapture the buy-and-hold upside the tactical long-only accounts
+  give up. Long/cash only.
 
 ```yaml
 accounts:
@@ -328,11 +335,34 @@ accounts:
     strategy_type: donchian_breakout
     products: [ETH-USD, SOL-USD]
     starting_cash: 10000
+  - name: long_short          # can profit when the market falls
+    strategy_type: trend_long_short
+    products: [BTC-USD, ETH-USD]
+    starting_cash: 10000
+    allow_short: true
+  - name: regime              # hold the bull, cash the bear
+    strategy_type: regime
+    products: [BTC-USD, ETH-USD]
+    starting_cash: 10000
+    risk_per_trade_pct: 0.95  # size to the equity cap, not a tight stop
+    max_position_pct: 0.95
+    stop_loss_atr_mult: 10    # wide "disaster only" stop; exit on the regime break
+    take_profit_atr_mult: 1000
+    trailing_stop: false
 ```
 
 Per-account `strategy:` overrides merge over the top-level strategy defaults, and
-risk controls are inherited unless overridden per account. See
-`config.example.yaml` for the fully commented version.
+risk controls are inherited unless overridden per account. `allow_short`
+(default `false`) is the single switch that lets an account open shorts — only
+`trend_long_short` emits short entries. See `config.example.yaml` for the fully
+commented version.
+
+**Shorting mechanics (paper).** Positions are signed: a SELL while flat opens a
+short (crediting the proceeds to cash), and a later BUY covers it, with realized
+P&L of `(entry − exit) × qty`. Equity is `cash + quantity × price`, so as a
+short's price falls its negative market value rises toward zero and equity grows.
+Stops/targets invert for shorts (stop above entry, target below), and the
+Chandelier trailing stop rides the lowest low since entry.
 
 ## Backtesting
 

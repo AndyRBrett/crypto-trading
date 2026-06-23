@@ -73,3 +73,24 @@ def test_risk_override_resolution():
     acct = AccountConfig(name="x", max_open_positions=5)
     assert acct.max_open_positions == 5
     assert acct.risk_per_trade_pct is None  # inherits from Config at runtime
+
+
+def test_allow_short_parsed_per_account(tmp_path):
+    path = _write(
+        tmp_path,
+        """
+accounts:
+  - name: long_short
+    strategy_type: trend_long_short
+    products: [BTC-USD]
+    allow_short: true
+  - name: trend
+    strategy_type: ema_crossover
+    products: [BTC-USD]
+""",
+    )
+    cfg = Config.load(path)
+    long_short, trend = cfg.accounts
+    assert long_short.allow_short is True
+    assert trend.allow_short is None        # unset -> inherits the long-only default
+    assert cfg.allow_short is False         # top-level default is long-only

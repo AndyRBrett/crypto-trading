@@ -58,11 +58,15 @@ strategy:
 #   ema_crossover       trend-following EMA crossover (the default/original)
 #   rsi_mean_reversion  counter-trend: buy oversold RSI, sell back toward the mean
 #   donchian_breakout   breakout: buy new N-bar highs, exit on M-bar lows
+#   trend_long_short    symmetric EMA trend follower that can SHORT downtrends
+#                       (needs allow_short: true on the account)
+#   regime              hold long above the 200-day trend MA, cash below it
 #
 # Each account gets its own products, starting_cash, and SQLite DB
 # (trading.<name>.db). Per-account `strategy:` overrides merge over the
 # top-level strategy defaults. Risk params are inherited from the top level
-# unless overridden per account.
+# unless overridden per account. ``allow_short`` (default false) lets an account
+# open shorts; only the long/short strategy emits short entries.
 accounts:
   - name: trend
     strategy_type: ema_crossover
@@ -85,6 +89,29 @@ accounts:
     strategy:
       donchian_period: 20
       donchian_exit_period: 10
+
+  # Symmetric long/short trend follower — can profit when the market falls.
+  - name: long_short
+    strategy_type: trend_long_short
+    products: [BTC-USD, ETH-USD]
+    starting_cash: 10000
+    allow_short: true        # the only field that enables shorting
+    strategy:
+      rsi_oversold: 15       # mirror of rsi_overbought: 85, so strong downtrends
+                             # (which pin RSI low) aren't blocked from shorting
+
+  # Regime filter: hold long above the 200-day MA, move to cash below it. Wide
+  # "disaster only" stops + cap-based sizing so it holds through pullbacks.
+  - name: regime
+    strategy_type: regime
+    products: [BTC-USD, ETH-USD]
+    starting_cash: 10000
+    risk_per_trade_pct: 0.95
+    max_position_pct: 0.95
+    stop_loss_atr_mult: 10
+    take_profit_atr_mult: 1000
+    trailing_stop: false
+    fallback_stop_pct: 0.5
 
 # Risk management: volatility-based sizing and protective exits.
 risk_per_trade_pct: 0.01     # risk ~1% of equity per trade (sized off the stop)

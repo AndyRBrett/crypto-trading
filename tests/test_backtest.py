@@ -62,3 +62,35 @@ def test_backtest_matches_engine_risk_layer():
     cfg = Config(starting_cash=10_000, risk_per_trade_pct=0.01, stop_loss_atr_mult=2.0)
     qty = risk.position_size(cfg, equity=10_000, cash=10_000, price=1000.0, atr=50.0)
     assert abs(qty - 1.0) < 1e-6
+
+
+def test_backtest_shorts_a_downtrend_for_a_profit():
+    # A long-only strategy can only sit in cash as the market falls; a
+    # short-enabled one profits from the decline. Wide stops + cap-based sizing
+    # (high risk_per_trade_pct) so the short is opened and held, not whipsawed.
+    cfg = Config(starting_cash=10_000, fee_rate=0.0, allow_short=True,
+                 trailing_stop=False, stop_loss_atr_mult=8.0, take_profit_atr_mult=1000.0,
+                 max_position_pct=0.95, risk_per_trade_pct=0.95)
+    strat = make_strategy(
+        "trend_long_short",
+        StrategyConfig(fast_period=3, slow_period=6, ma_type="sma", trend_period=10,
+                       adx_filter=False, rsi_oversold=-1.0, rsi_overbought=101.0, atr_period=3),
+    )
+    res = run_backtest(strat, _candles([200 - i for i in range(120)]), cfg, product_id="BTC-USD")
+    assert len(res.trades) >= 1          # a short was opened
+    assert res.total_return_pct > 0      # shorting the decline made money
+    assert res.buy_hold_return_pct < 0   # holding it would have lost
+
+
+def test_backtest_long_only_ignores_short_signals_in_a_downtrend():
+    # Same falling market, but allow_short is off: the bot stays flat (no trades),
+    # confirming the long-only path is unchanged.
+    cfg = Config(starting_cash=10_000, fee_rate=0.0, allow_short=False)
+    strat = make_strategy(
+        "trend_long_short",
+        StrategyConfig(fast_period=3, slow_period=6, ma_type="sma", trend_period=10,
+                       adx_filter=False, rsi_oversold=-1.0, rsi_overbought=101.0, atr_period=3),
+    )
+    res = run_backtest(strat, _candles([200 - i for i in range(120)]), cfg, product_id="BTC-USD")
+    assert len(res.trades) == 0
+    assert res.final_equity == 10_000

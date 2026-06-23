@@ -50,6 +50,7 @@ def _resolve(base: Config, acct, fee_override=None) -> Config:
         take_profit_atr_mult=pick(acct.take_profit_atr_mult, base.take_profit_atr_mult),
         trailing_stop=pick(acct.trailing_stop, base.trailing_stop),
         fallback_stop_pct=pick(acct.fallback_stop_pct, base.fallback_stop_pct),
+        allow_short=pick(acct.allow_short, base.allow_short),
         accounts=[],
     )
 

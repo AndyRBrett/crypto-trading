@@ -155,3 +155,45 @@ def test_donchian_sentiment_vetoes_buy():
     rows = ohlc([(10, 9, 10)] * 4 + [(20, 18, 20)])
     sig = s.generate_signal("BTC-USD", rows, sentiment=FakeSentiment(-0.9))
     assert sig.action == HOLD
+
+
+# -- new long/short + regime strategies -------------------------------------
+
+
+def test_registry_includes_long_short_and_regime():
+    assert {"trend_long_short", "regime"} <= set(available())
+
+
+def _long_short():
+    # RSI gates widened out of the way so the test exercises the trend logic.
+    return make_strategy(
+        "trend_long_short",
+        StrategyConfig(fast_period=3, slow_period=6, ma_type="sma", trend_period=10,
+                       adx_filter=False, rsi_oversold=-1.0, rsi_overbought=101.0),
+    )
+
+
+def test_trend_long_short_shorts_a_downtrend():
+    sig = _long_short().generate_signal("BTC-USD", closes([200 - 3 * i for i in range(30)]))
+    assert sig.action == SELL          # fast < slow, price below the trend MA
+    assert "atr" in sig.indicators     # the engine needs ATR to size/stop
+
+
+def test_trend_long_short_longs_an_uptrend():
+    sig = _long_short().generate_signal("BTC-USD", closes([100 + 3 * i for i in range(30)]))
+    assert sig.action == BUY
+
+
+def test_regime_holds_above_trend_ma_and_exits_below():
+    strat = make_strategy("regime", StrategyConfig(trend_period=10, atr_period=5))
+    assert strat.generate_signal("BTC-USD", closes([100 + 2 * i for i in range(20)])).action == BUY
+    assert strat.generate_signal("BTC-USD", closes([200 - 2 * i for i in range(20)])).action == SELL
+
+
+def test_regime_ignores_sentiment():
+    # The regime model is price-only; a bearish news score must not change a BUY.
+    strat = make_strategy("regime", StrategyConfig(trend_period=10, atr_period=5))
+    sig = strat.generate_signal(
+        "BTC-USD", closes([100 + 2 * i for i in range(20)]), sentiment=FakeSentiment(-0.9)
+    )
+    assert sig.action == BUY

@@ -34,13 +34,20 @@ realistic target; beating it outright likely needs leverage or shorting.
    core long position; only exit on a strong bearish regime signal (e.g. price
    below the 200-day MA *and* a momentum break), then re-enter on recovery. This
    keeps you invested through normal pullbacks.
-3. **Regime switch.** Use a regime filter (trend strength / volatility) to hold
-   passively in confirmed bull regimes and switch to tactical TA only in
-   chop/bear regimes — get B&H upside in trends, TA's drawdown protection otherwise.
+3. **Regime switch. — ✅ DONE (first cut).** The `regime` strategy
+   (`bot/strategies.py`) holds a long while price is above the long-term trend MA
+   and moves to cash below it, sized to the equity cap with wide "disaster only"
+   stops so it holds through pullbacks. Running live as the `regime` account.
+   *Next:* validate on a multi-year backtest once an exchange is reachable, and
+   compare its B&H gap to the tactical accounts. Consider a volatility overlay.
 4. **Core + tactical allocation.** Keep a fixed passive core (e.g. 50% buy-and-hold)
    plus a tactical TA sleeve on the rest. Trivially narrows the gap; tune the split.
-5. **Leverage / shorting** (out of the current long-only, paper-only scope —
-   only if we deliberately expand the mandate). Highest ceiling, highest risk.
+5. **Leverage / shorting. — ✅ DONE (shorting; first cut).** The portfolio now
+   supports signed positions, the engine/backtester open and manage shorts with
+   direction-aware stops, and `trend_long_short` shorts confirmed downtrends.
+   Running live as the `long_short` account (`allow_short: true`). Leverage is
+   still out of scope. *Next:* backtest the long/short edge across BTC/ETH/SOL
+   over multiple years and compare risk-adjusted return vs. the long-only sleeves.
 
 **How to measure.** Build each as a strategy in `bot/strategies.py`, then judge it
 with the backtester's `B&H (vs …)` column and the sweep's in-sample→holdout split.

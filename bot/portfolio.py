@@ -3,6 +3,15 @@
 Tracks cash, open positions (with average cost basis), and a trade log.
 No real orders are ever placed — this simulates fills at the supplied price
 and applies a configurable taker fee so results stay honest.
+
+Positions are *signed*: a positive quantity is a long, a negative quantity is a
+short. A BUY always costs cash and a SELL always credits cash, regardless of
+direction — so a SELL while flat opens a short (you receive the proceeds), and a
+later BUY covers it. With ``equity = cash + quantity * price`` that signed
+convention prices both directions correctly: as a short's price falls, its
+(negative) market value rises toward zero and equity grows. Shorting is only
+ever *initiated* by the engine when an account enables it; the portfolio itself
+just executes the fills it's handed.
 """
 
 from __future__ import annotations
@@ -33,9 +42,11 @@ class Trade:
 
 @dataclass
 class Position:
+    # Signed: > 0 long, < 0 short, 0 flat.
     quantity: float = 0.0
+    # The entry price (always a positive number, for either direction).
     avg_price: float = 0.0
-    # Buy-side fees paid to open the currently-held quantity. Kept separate from
+    # Fees paid to open the currently-held quantity. Kept separate from
     # avg_price (so stops/targets still key off the clean entry price) but folded
     # into realized/unrealized P&L so fees are never silently dropped.
     entry_fees: float = 0.0
@@ -63,9 +74,12 @@ class Portfolio:
         return self.positions.get(product_id, Position())
 
     def market_value(self, prices: dict[str, float]) -> float:
+        # Signed net value: longs add, shorts subtract. With cash holding a
+        # short's proceeds, ``cash + market_value`` is the correct equity for
+        # either direction.
         total = 0.0
         for product_id, pos in self.positions.items():
-            if pos.quantity > 0 and product_id in prices:
+            if pos.quantity != 0 and product_id in prices:
                 total += pos.quantity * prices[product_id]
         return total
 
@@ -75,18 +89,21 @@ class Portfolio:
     def unrealized_pnl(self, prices: dict[str, float]) -> float:
         total = 0.0
         for product_id, pos in self.positions.items():
-            if pos.quantity > 0 and product_id in prices:
+            if pos.quantity != 0 and product_id in prices:
+                # Signed quantity makes one formula serve both directions:
+                # for a short (quantity < 0) this is (avg_price - price) * |qty|.
                 total += (prices[product_id] - pos.avg_price) * pos.quantity
-                total -= pos.entry_fees  # the buy-side fee already paid to open
+                total -= pos.entry_fees  # the fee already paid to open
         return total
 
     def realized_pnl(self) -> float:
         return sum(t.realized_pnl for t in self.trades)
 
     def opened_at(self, product_id: str) -> float | None:
-        """Timestamp the current open position was first opened (0 -> long).
+        """Timestamp the current open position was first opened.
 
-        Used by the trailing stop to find the highest high *since entry*.
+        Used by the trailing stop to find the highest high (long) or lowest low
+        (short) *since entry*. Magnitude-based so it works for either direction.
         Returns None if the position is currently flat.
         """
         qty = 0.0
@@ -94,11 +111,11 @@ class Portfolio:
         for t in sorted(self.trades, key=lambda x: x.timestamp):
             if t.product_id != product_id:
                 continue
-            was_flat = qty <= 1e-9
+            was_flat = abs(qty) <= 1e-9
             qty += t.quantity if t.side == BUY else -t.quantity
-            if was_flat and qty > 1e-9:
+            if was_flat and abs(qty) > 1e-9:
                 opened = t.timestamp
-            if qty <= 1e-9:
+            if abs(qty) <= 1e-9:
                 qty = 0.0
                 opened = None
         return opened
@@ -121,46 +138,34 @@ class Portfolio:
         reasons = reasons or []
         indicators = indicators or {}
 
+        pos = self.positions.get(product_id, Position())
+        fee = price * quantity * self.fee_rate
         if side == BUY:
-            cost = price * quantity
-            fee = cost * self.fee_rate
-            if cost + fee > self.cash + 1e-9:
+            if pos.quantity < 0:
+                # Buying back a short (cover). We can't cover more than we're
+                # short — the engine never flips in a single fill.
+                if quantity > -pos.quantity + 1e-9:
+                    raise InsufficientPosition(
+                        f"Tried to cover {quantity} but only short {-pos.quantity}"
+                    )
+                # No funds check on a cover: it's paid for out of the proceeds
+                # already booked to cash when the short was opened.
+            elif price * quantity + fee > self.cash + 1e-9:
+                # Opening/adding a long must fit in cash.
                 raise InsufficientFunds(
-                    f"Need {cost + fee:.2f} but only {self.cash:.2f} cash available"
+                    f"Need {price * quantity + fee:.2f} but only {self.cash:.2f} cash available"
                 )
-            self.cash -= cost + fee
-            pos = self.positions.setdefault(product_id, Position())
-            new_qty = pos.quantity + quantity
-            pos.avg_price = (pos.avg_price * pos.quantity + price * quantity) / new_qty
-            pos.quantity = new_qty
-            pos.entry_fees += fee
-            realized = 0.0
         elif side == SELL:
-            pos = self.positions.get(product_id, Position())
-            if quantity > pos.quantity + 1e-9:
+            # Selling more than a long position is over-selling; a SELL while
+            # flat or short instead opens/adds a short (allowed).
+            if pos.quantity > 0 and quantity > pos.quantity + 1e-9:
                 raise InsufficientPosition(
                     f"Tried to sell {quantity} but only hold {pos.quantity}"
                 )
-            proceeds = price * quantity
-            fee = proceeds * self.fee_rate
-            # Attribute a proportional share of the buy-side fees to the sold
-            # quantity so realized P&L reflects the *round-trip* cost, not just
-            # the sell fee. (Without this, realized_pnl overstates profit by the
-            # entry fees and never reconciles with the cash balance.)
-            entry_fee_share = (
-                pos.entry_fees * (quantity / pos.quantity) if pos.quantity else 0.0
-            )
-            realized = (price - pos.avg_price) * quantity - fee - entry_fee_share
-            self.cash += proceeds - fee
-            pos.quantity -= quantity
-            pos.entry_fees -= entry_fee_share
-            if pos.quantity <= 1e-9:
-                pos.quantity = 0.0
-                pos.avg_price = 0.0
-                pos.entry_fees = 0.0
         else:
             raise ValueError(f"unknown side {side!r}")
 
+        realized = self._apply(side, product_id, price, quantity, fee)
         trade = Trade(
             timestamp=timestamp,
             product_id=product_id,
@@ -176,6 +181,54 @@ class Portfolio:
         self.trades.append(trade)
         return trade
 
+    def _apply(
+        self, side: str, product_id: str, price: float, quantity: float, fee: float
+    ) -> float:
+        """Mutate cash + position for one fill; return realized P&L.
+
+        Direction-agnostic and validation-free (``execute`` validates; replay
+        from a trade log trusts the log). A BUY always debits cash and a SELL
+        always credits it; whether that opens, adds to, or closes a position
+        depends on the current sign. Realized P&L is attributed only to the
+        closing leg, net of this fill's fee plus a proportional share of the
+        entry fees — so it reconciles exactly with cash once flat.
+        """
+        pos = self.positions.setdefault(product_id, Position())
+        realized = 0.0
+        if side == BUY:
+            self.cash -= price * quantity + fee
+            if pos.quantity < 0:  # covering a short
+                mag = -pos.quantity
+                entry_fee_share = pos.entry_fees * (quantity / mag) if mag else 0.0
+                realized = (pos.avg_price - price) * quantity - fee - entry_fee_share
+                pos.entry_fees -= entry_fee_share
+                pos.quantity += quantity  # toward zero
+            else:  # opening / adding a long
+                new_qty = pos.quantity + quantity
+                pos.avg_price = (pos.avg_price * pos.quantity + price * quantity) / new_qty
+                pos.quantity = new_qty
+                pos.entry_fees += fee
+        else:  # SELL
+            self.cash += price * quantity - fee
+            if pos.quantity > 0:  # closing a long
+                entry_fee_share = (
+                    pos.entry_fees * (quantity / pos.quantity) if pos.quantity else 0.0
+                )
+                realized = (price - pos.avg_price) * quantity - fee - entry_fee_share
+                pos.entry_fees -= entry_fee_share
+                pos.quantity -= quantity
+            else:  # opening / adding a short
+                mag = -pos.quantity
+                new_mag = mag + quantity
+                pos.avg_price = (pos.avg_price * mag + price * quantity) / new_mag
+                pos.quantity = -new_mag
+                pos.entry_fees += fee
+        if abs(pos.quantity) <= 1e-9:
+            pos.quantity = 0.0
+            pos.avg_price = 0.0
+            pos.entry_fees = 0.0
+        return realized
+
     @classmethod
     def from_trades(
         cls, starting_cash: float, fee_rate: float, trades: list[Trade]
@@ -183,25 +236,8 @@ class Portfolio:
         """Rebuild portfolio state by replaying a trade log (used on restart)."""
         p = cls(starting_cash, fee_rate)
         for t in sorted(trades, key=lambda x: x.timestamp):
-            # Re-apply the cash/position effects without recomputing fees.
-            if t.side == BUY:
-                p.cash -= t.notional() + t.fee
-                pos = p.positions.setdefault(t.product_id, Position())
-                new_qty = pos.quantity + t.quantity
-                pos.avg_price = (
-                    pos.avg_price * pos.quantity + t.price * t.quantity
-                ) / new_qty
-                pos.quantity = new_qty
-                pos.entry_fees += t.fee
-            else:  # SELL
-                pos = p.positions.setdefault(t.product_id, Position())
-                p.cash += t.notional() - t.fee
-                if pos.quantity:
-                    pos.entry_fees -= pos.entry_fees * (t.quantity / pos.quantity)
-                pos.quantity = max(0.0, pos.quantity - t.quantity)
-                if pos.quantity <= 1e-9:
-                    pos.quantity = 0.0
-                    pos.avg_price = 0.0
-                    pos.entry_fees = 0.0
+            # Re-apply each fill's cash/position effect using the stored fee
+            # (no recompute); the shared helper handles longs and shorts alike.
+            p._apply(t.side, t.product_id, t.price, t.quantity, t.fee)
             p.trades.append(t)
         return p

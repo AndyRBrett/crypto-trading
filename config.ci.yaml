@@ -53,6 +53,36 @@ accounts:
     products: [ETH-USD, SOL-USD]
     starting_cash: 10000
 
+  # Symmetric trend follower that can SHORT confirmed downtrends — the only
+  # sleeve that can make money while the market falls (instead of sitting in
+  # cash like the long-only accounts). Inherits the default ATR stops/targets.
+  - name: long_short
+    strategy_type: trend_long_short
+    products: [BTC-USD, ETH-USD]
+    starting_cash: 10000
+    allow_short: true
+    strategy:
+      # Mirror of the long side's rsi_overbought: 85 — a strong downtrend pins
+      # RSI low, so a high oversold floor (30) would block shorts exactly when
+      # the trend is strongest. 15 only stands aside at a washed-out extreme.
+      rsi_oversold: 15
+
+  # Stay-invested regime filter: hold a long while price is above the 200-day
+  # trend MA (capturing the bull-market upside the tactical accounts give up),
+  # move to cash on a break below it. Sized to the equity cap and given wide
+  # "disaster only" stops so it holds through ordinary pullbacks — the routine
+  # exit is the regime break, not an ATR stop.
+  - name: regime
+    strategy_type: regime
+    products: [BTC-USD, ETH-USD]
+    starting_cash: 10000
+    risk_per_trade_pct: 0.95
+    max_position_pct: 0.95
+    stop_loss_atr_mult: 10
+    take_profit_atr_mult: 1000
+    trailing_stop: false
+    fallback_stop_pct: 0.5
+
 # Risk management: volatility-based sizing and protective exits.
 risk_per_trade_pct: 0.01
 max_position_pct: 0.30

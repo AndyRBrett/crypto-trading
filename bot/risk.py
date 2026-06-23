@@ -15,11 +15,20 @@ from typing import Sequence
 DUST_NOTIONAL = 10.0
 
 
-def position_size(cfg, equity: float, cash: float, price: float, atr: float | None) -> float:
+def position_size(
+    cfg,
+    equity: float,
+    cash: float,
+    price: float,
+    atr: float | None,
+    direction: str = "long",
+) -> float:
     """Volatility-based size so the stop distance risks ~``risk_per_trade_pct``.
 
-    Bounded by the per-position equity cap and available cash (fee-aware).
-    Returns 0 for non-positive inputs or dust-sized trades.
+    Bounded by the per-position equity cap and (for longs) available cash.
+    Returns 0 for non-positive inputs or dust-sized trades. ``direction`` selects
+    long vs short: a short is opened with a SELL that *credits* cash, so the
+    cash bound doesn't apply — only the risk and equity-cap bounds do.
     """
     if price <= 0 or equity <= 0:
         return 0.0
@@ -28,8 +37,11 @@ def position_size(cfg, equity: float, cash: float, price: float, atr: float | No
         return 0.0
     qty_by_risk = (equity * cfg.risk_per_trade_pct) / stop_dist
     qty_by_cap = (equity * cfg.max_position_pct) / price
-    qty_by_cash = (cash * 0.999) / (price * (1 + cfg.fee_rate))
-    qty = min(qty_by_risk, qty_by_cap, qty_by_cash)
+    if direction == "short":
+        qty = min(qty_by_risk, qty_by_cap)
+    else:
+        qty_by_cash = (cash * 0.999) / (price * (1 + cfg.fee_rate))
+        qty = min(qty_by_risk, qty_by_cap, qty_by_cash)
     if qty * price < DUST_NOTIONAL:
         return 0.0
     return qty
@@ -41,12 +53,39 @@ def protective_exit_reason(
     price: float,
     atr: float | None,
     highs_since_entry: Sequence[float] | None = None,
+    lows_since_entry: Sequence[float] | None = None,
+    direction: str = "long",
 ) -> str | None:
     """Return an exit reason if a stop / take-profit / trailing level is breached.
 
-    ``highs_since_entry`` powers the Chandelier trailing stop (the highest high
-    since the position opened); pass an empty/None sequence to disable trailing.
+    For a long the stop sits *below* entry and the target *above*; for a short
+    they invert. The Chandelier trailing stop rides the highest high since entry
+    (long) or the lowest low since entry (short) — pass an empty/None sequence to
+    disable trailing. ``direction`` is ``"long"`` or ``"short"``.
     """
+    if direction == "short":
+        if atr and atr > 0:
+            stop = entry + cfg.stop_loss_atr_mult * atr
+            target = entry - cfg.take_profit_atr_mult * atr
+            if cfg.trailing_stop and lows_since_entry:
+                # Ratchet the stop down as price makes new lows.
+                stop = min(stop, min(lows_since_entry) + cfg.stop_loss_atr_mult * atr)
+        else:
+            stop = entry * (1 + cfg.fallback_stop_pct)
+            target = None
+
+        if price >= stop:
+            return (
+                f"Stop-loss (short): price ${price:,.2f} hit stop ${stop:,.2f} "
+                f"(entry ${entry:,.2f}) — cutting the loss / locking in gains."
+            )
+        if target is not None and price <= target:
+            return (
+                f"Take-profit (short): price ${price:,.2f} reached target ${target:,.2f} "
+                f"(entry ${entry:,.2f})."
+            )
+        return None
+
     if atr and atr > 0:
         stop = entry - cfg.stop_loss_atr_mult * atr
         target = entry + cfg.take_profit_atr_mult * atr
