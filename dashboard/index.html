@@ -889,7 +889,7 @@ async function doSubscribe() {
       <p>✅ Subscribed! Copy the JSON below and add it as a GitHub Actions secret named <strong>PUSH_SUBSCRIPTION</strong> in your repo's Settings → Secrets → Actions.</p>
       <textarea id="notif-json" readonly>${json}</textarea>
       <button id="notif-copy" onclick="copySubJson()">Copy to clipboard</button>
-      <p style="margin-top:10px">Also add <strong>VAPID_PRIVATE_KEY</strong> = <code>bKgEBxRtFXNF4W9GKFqDN1IKpdATeUm52fM9A9RWH4E</code> as a secret if you haven't already.</p>
+      <p style="margin-top:10px">Also add your own <strong>VAPID_PRIVATE_KEY</strong> as a secret if you haven't already (see .env.example to generate one — never reuse a key from docs).</p>
     `;
   } catch (err) {
     document.getElementById("notif-body").innerHTML =
