@@ -100,6 +100,12 @@ def _strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text or "").strip()
 
 
+# Cap feed responses before parsing — an oversized or maliciously crafted RSS
+# body (e.g. a compromised feed doing entity-expansion) shouldn't be able to
+# tie up the parser or the process's memory.
+_MAX_FEED_BYTES = 5 * 1024 * 1024
+
+
 class NewsFeed:
     def __init__(self, feeds: list[str]):
         self.feeds = feeds
@@ -109,6 +115,8 @@ class NewsFeed:
     @staticmethod
     def parse(content: bytes | str, limit: int = 40) -> list[dict]:
         """Parse RSS bytes into a list of {title, summary} dicts."""
+        if len(content) > _MAX_FEED_BYTES:
+            raise ValueError(f"feed body too large ({len(content)} bytes)")
         root = ElementTree.fromstring(content)
         items: list[dict] = []
         for item in root.iter("item"):
@@ -125,9 +133,12 @@ class NewsFeed:
         out: list[dict] = []
         for url in self.feeds:
             try:
-                resp = self.session.get(url, timeout=15)
+                resp = self.session.get(url, timeout=15, stream=True)
                 resp.raise_for_status()
-                out.extend(self.parse(resp.content, limit_per_feed))
+                content = resp.raw.read(_MAX_FEED_BYTES + 1, decode_content=True)
+                if len(content) > _MAX_FEED_BYTES:
+                    raise ValueError(f"feed body too large (>{_MAX_FEED_BYTES} bytes)")
+                out.extend(self.parse(content, limit_per_feed))
             except Exception as exc:
                 log.warning("news feed failed %s: %s", url, exc)
         return out

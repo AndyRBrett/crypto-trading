@@ -1,13 +1,17 @@
+# Pinned for reproducible builds — verified against the test suite. Bump
+# deliberately (and re-run `pytest`) rather than letting CI silently pick up
+# new majors.
+
 # Core runtime
-requests>=2.31
-PyYAML>=6.0
-cryptography>=41.0
+requests==2.34.2
+PyYAML==6.0.3
+cryptography==49.0.0
 
 # Claude trade explanations
-anthropic>=0.39
+anthropic==0.115.0
 
 # Unified exchange interface (100+ exchanges, public + authenticated).
-ccxt>=4.0.0
+ccxt==4.5.63
 
 # Dev/test
-pytest>=8.0
+pytest==9.1.1
