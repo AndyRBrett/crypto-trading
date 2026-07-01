@@ -172,6 +172,11 @@
 const fmtUSD = (n) => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const fmtNum = (n, d = 6) => Number(n).toLocaleString(undefined, {maximumFractionDigits: d});
 const cls = (n) => (n >= 0 ? "pos" : "neg");
+// Escape untrusted/data-driven text (product ids, strategy names, LLM trade
+// explanations, sentiment summaries, ...) before it goes into innerHTML.
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => (
+  { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+));
 const ago = (ts) => {
   const s = Math.floor(Date.now() / 1000 - ts);
   if (s < 60) return s + "s ago";
@@ -209,7 +214,7 @@ function renderSummary(s) {
   let stance;
   if (positions.length) {
     const parts = positions.map(p =>
-      `${fmtNum(p.quantity, 4)} ${p.product_id} (${p.unrealized_pnl >= 0 ? "+" : ""}${fmtUSD(p.unrealized_pnl)})`);
+      `${fmtNum(p.quantity, 4)} ${esc(p.product_id)} (${p.unrealized_pnl >= 0 ? "+" : ""}${fmtUSD(p.unrealized_pnl)})`);
     stance = `In the market — holding ${parts.join(", ")}.`;
   } else {
     stance = "Flat — all in cash, waiting for a setup.";
@@ -256,7 +261,7 @@ function renderPositions(s) {
   el.innerHTML = `<table><thead><tr>
       <th>Market</th><th>Qty</th><th>Avg price</th><th>Price</th><th>Value</th><th>Unrealized P&L</th>
     </tr></thead><tbody>` + s.positions.map(p => `<tr>
-      <td>${p.product_id}</td>
+      <td>${esc(p.product_id)}</td>
       <td class="mono">${fmtNum(p.quantity)}</td>
       <td class="mono">${fmtUSD(p.avg_price)}</td>
       <td class="mono">${fmtUSD(p.price)}</td>
@@ -274,11 +279,11 @@ function renderSignals(s) {
     </tr></thead><tbody>` + entries.map(([pid, sig]) => {
       const ind = sig.indicators || {};
       const sent = sig.sentiment
-        ? `${sig.sentiment.label} (${sig.sentiment.score >= 0 ? "+" : ""}${sig.sentiment.score})`
+        ? `${esc(sig.sentiment.label)} (${sig.sentiment.score >= 0 ? "+" : ""}${sig.sentiment.score})`
         : "—";
       return `<tr>
-        <td>${pid}</td>
-        <td><span class="badge ${sig.action}">${sig.action}</span></td>
+        <td>${esc(pid)}</td>
+        <td><span class="badge ${esc(sig.action)}">${esc(sig.action)}</span></td>
         <td class="mono">${fmtUSD(sig.price)}</td>
         <td class="mono">${ind.fast_sma ?? "—"}</td>
         <td class="mono">${ind.slow_sma ?? "—"}</td>
@@ -286,7 +291,7 @@ function renderSignals(s) {
         <td class="mono">${ind.rsi ?? "—"}</td>
         <td class="mono">${ind.adx ?? "—"}</td>
         <td>${sent}</td>
-        <td>${(sig.reasons || []).join(" ")}</td>
+        <td>${esc((sig.reasons || []).join(" "))}</td>
       </tr>`;
     }).join("") + `</tbody></table>`;
 }
@@ -321,13 +326,13 @@ function renderActivity(s) {
     </tr></thead><tbody>` + items.map(a => {
       const th = a.features && a.features.thresholds;
       const near = th && Object.keys(th).length
-        ? `<div class="meta">how close: ${fmtThresholds(th)}</div>` : "";
+        ? `<div class="meta">how close: ${esc(fmtThresholds(th))}</div>` : "";
       return `<tr>
       <td class="when">${ago(a.timestamp)}</td>
-      <td>${a.product_id}</td>
-      <td><span class="badge ${a.action}">${a.action}</span></td>
+      <td>${esc(a.product_id)}</td>
+      <td><span class="badge ${esc(a.action)}">${esc(a.action)}</span></td>
       <td class="mono">${fmtUSD(a.price)}</td>
-      <td>${a.reason || ""}${near}</td>
+      <td>${esc(a.reason || "")}${near}</td>
     </tr>`;
     }).join("") + `</tbody></table>`;
 }
@@ -342,15 +347,15 @@ function renderTrades(s) {
     return `<div class="trade">
       <div class="top">
         <div>
-          <span class="badge ${t.side}">${t.side}</span>
-          <strong>${t.product_id}</strong>
+          <span class="badge ${esc(t.side)}">${esc(t.side)}</span>
+          <strong>${esc(t.product_id)}</strong>
           <span class="mono">${fmtNum(t.quantity)} @ ${fmtUSD(t.price)}</span>
           <span class="when">(${fmtUSD(t.notional)}${pnl})</span>
         </div>
         <span class="when">${ago(t.timestamp)}</span>
       </div>
-      <p class="explain">${t.explanation || (t.reasons || []).join(" ")}</p>
-      <div class="meta">fast MA ${ind.fast_sma ?? "—"} · slow MA ${ind.slow_sma ?? "—"} · RSI ${ind.rsi ?? "—"}${ind.adx != null ? ` · ADX ${ind.adx}` : ""}${ind.atr != null ? ` · ATR ${ind.atr}` : ""}${ind.sentiment_label ? ` · sentiment ${ind.sentiment_label} (${ind.sentiment_score})` : ""} · fee ${fmtUSD(t.fee)}</div>
+      <p class="explain">${esc(t.explanation || (t.reasons || []).join(" "))}</p>
+      <div class="meta">fast MA ${ind.fast_sma ?? "—"} · slow MA ${ind.slow_sma ?? "—"} · RSI ${ind.rsi ?? "—"}${ind.adx != null ? ` · ADX ${ind.adx}` : ""}${ind.atr != null ? ` · ATR ${ind.atr}` : ""}${ind.sentiment_label ? ` · sentiment ${esc(ind.sentiment_label)} (${ind.sentiment_score})` : ""} · fee ${fmtUSD(t.fee)}</div>
     </div>`;
   }).join("");
 }
@@ -448,7 +453,7 @@ function renderFilter(s) {
   if (!(s.products && s.products.length)) { el.innerHTML = ""; return; }
   const coins = ["ALL"].concat(s.products);
   el.innerHTML = coins.map(c =>
-    `<button class="chip ${c === selectedCoin ? "active" : ""}" data-coin="${c}">${c === "ALL" ? "All" : c}</button>`
+    `<button class="chip ${c === selectedCoin ? "active" : ""}" data-coin="${esc(c)}">${c === "ALL" ? "All" : esc(c)}</button>`
   ).join("");
   el.querySelectorAll("button").forEach(b => {
     b.onclick = () => { selectedCoin = b.dataset.coin; if (lastState) renderState(lastState); };
@@ -529,15 +534,15 @@ function renderStrategyNote(state) {
   if (selectedAccount === "__total__") {
     const seen = [];
     accts.forEach(a => { if (a.strategy && !seen.includes(a.strategy)) seen.push(a.strategy); });
-    const list = seen.map(s => `<strong>${(STRATEGY_INFO[s] || {}).name || s}</strong>`).join(", ");
+    const list = seen.map(s => `<strong>${esc((STRATEGY_INFO[s] || {}).name || s)}</strong>`).join(", ");
     el.innerHTML = `All accounts combined — each trades its own strategy${list ? `: ${list}` : ""}. Pick a tab to see how it works.`;
     return;
   }
   const acct = accts.find(a => a.name === selectedAccount);
   const info = acct && STRATEGY_INFO[acct.strategy];
   el.innerHTML = info
-    ? `<strong>${info.name}</strong> — ${info.desc}`
-    : (acct ? `Strategy: <strong>${acct.strategy}</strong>` : "");
+    ? `<strong>${esc(info.name)}</strong> — ${esc(info.desc)}`
+    : (acct ? `Strategy: <strong>${esc(acct.strategy)}</strong>` : "");
 }
 
 function renderAccountTabs(state) {
@@ -551,7 +556,7 @@ function renderAccountTabs(state) {
   const tabs = [{ key: "__total__", label: "Total" }]
     .concat(accts.map(a => ({ key: a.name, label: `${a.name} · ${a.strategy}` })));
   el.innerHTML = tabs.map(t =>
-    `<button class="chip ${t.key === selectedAccount ? "active" : ""}" data-acct="${t.key}">${t.label}</button>`
+    `<button class="chip ${t.key === selectedAccount ? "active" : ""}" data-acct="${esc(t.key)}">${esc(t.label)}</button>`
   ).join("");
   el.querySelectorAll("button").forEach(b => {
     b.onclick = () => { selectedAccount = b.dataset.acct; selectedCoin = "ALL"; if (lastState) renderState(lastState); };
@@ -855,7 +860,7 @@ if ("serviceWorker" in navigator) {
 
 // --- Push notification subscription ---
 
-const VAPID_PUBLIC_KEY = "BFJPouzIXD3_ZKLdZZurK3fMTL2O91Q3T4EMVttesHmVIe6EWEfQzR-6ksDuzJSfVrj0XYvHEUty3bsPszOBGG4";
+const VAPID_PUBLIC_KEY = "BCAYtguJZljmO5XG6Hb6PR2bfRuRYkqrHvnpP_c8TmMNnNmj6Uiv0V3gmpY2xUGYV8YclkCDGqgLRzcyw8_eGHE";
 
 function _urlB64ToUint8(b64) {
   const pad = "=".repeat((4 - b64.length % 4) % 4);
@@ -887,13 +892,13 @@ async function doSubscribe() {
     // Show the JSON + instructions
     document.getElementById("notif-body").innerHTML = `
       <p>✅ Subscribed! Copy the JSON below and add it as a GitHub Actions secret named <strong>PUSH_SUBSCRIPTION</strong> in your repo's Settings → Secrets → Actions.</p>
-      <textarea id="notif-json" readonly>${json}</textarea>
+      <textarea id="notif-json" readonly>${esc(json)}</textarea>
       <button id="notif-copy" onclick="copySubJson()">Copy to clipboard</button>
-      <p style="margin-top:10px">Also add <strong>VAPID_PRIVATE_KEY</strong> = <code>bKgEBxRtFXNF4W9GKFqDN1IKpdATeUm52fM9A9RWH4E</code> as a secret if you haven't already.</p>
+      <p style="margin-top:10px">Also add your own <strong>VAPID_PRIVATE_KEY</strong> as a secret if you haven't already (see .env.example to generate one — never reuse a key from docs).</p>
     `;
   } catch (err) {
     document.getElementById("notif-body").innerHTML =
-      `<p style="color:var(--red)">${err.message}</p><p><button id="notif-copy" onclick="closeNotifModal()">Close</button></p>`;
+      `<p style="color:var(--red)">${esc(err.message)}</p><p><button id="notif-copy" onclick="closeNotifModal()">Close</button></p>`;
   }
 }
 
