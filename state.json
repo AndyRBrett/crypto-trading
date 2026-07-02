@@ -1,6 +1,6 @@
 {
   "schema": "multi-account-v1",
-  "updated_at": 1783013058.6369724,
+  "updated_at": 1783019170.067833,
   "granularity": "ONE_DAY",
   "products": [
     "BTC-USD",
@@ -8,9 +8,9 @@
     "SOL-USD"
   ],
   "prices": {
-    "BTC-USD": 61825.97,
-    "ETH-USD": 1702.08,
-    "SOL-USD": 81.03
+    "BTC-USD": 61612.06,
+    "ETH-USD": 1698.4,
+    "SOL-USD": 80.92
   },
   "price_history": {
     "BTC-USD": [
@@ -852,7 +852,7 @@
         "o": 59961.46,
         "h": 62147.89,
         "l": 59520.02,
-        "c": 61825.97
+        "c": 61612.06
       }
     ],
     "ETH-USD": [
@@ -1694,7 +1694,7 @@
         "o": 1607.8,
         "h": 1723.05,
         "l": 1595.2,
-        "c": 1702.08
+        "c": 1698.4
       }
     ],
     "SOL-USD": [
@@ -2536,18 +2536,18 @@
         "o": 77.38,
         "h": 82.68,
         "l": 76.82,
-        "c": 81.03
+        "c": 80.92
       }
     ]
   },
   "portfolio_total": {
     "starting_cash": 50000,
     "cash": 51012.080554583394,
-    "market_value": -1632.5419245116675,
-    "equity": 49379.53863007172,
+    "market_value": -1626.415845411127,
+    "equity": 49385.66470917226,
     "realized_pnl": -492.3563740087337,
-    "unrealized_pnl": 31.157758579471082,
-    "total_return_pct": -1.2409227398565537
+    "unrealized_pnl": 37.28383768001123,
+    "total_return_pct": -1.2286705816554777
   },
   "accounts": [
     {
@@ -2568,7 +2568,7 @@
       "latest_signals": {
         "BTC-USD": {
           "action": "HOLD",
-          "price": 61825.97,
+          "price": 61612.06,
           "strength": 0.0,
           "reasons": [
             "No crossover. Fast MA below slow MA; RSI 37.3 is neutral.",
@@ -2600,7 +2600,7 @@
         },
         "ETH-USD": {
           "action": "HOLD",
-          "price": 1702.08,
+          "price": 1698.4,
           "strength": 0.0,
           "reasons": [
             "No crossover. Fast MA below slow MA; RSI 39.6 is neutral.",
@@ -2632,6 +2632,76 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1783019169.8398058,
+          "product_id": "ETH-USD",
+          "action": "HOLD",
+          "price": 1698.4,
+          "reason": "No crossover. Fast MA below slow MA; RSI 39.6 is neutral.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 1661.27,
+              "slow_sma": 1814.33,
+              "prev_fast_sma": 1666.92,
+              "prev_slow_sma": 1822.77,
+              "rsi": 39.6,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 2411.47,
+              "atr": 81.02,
+              "adx": 30.21,
+              "sentiment_score": 0.0,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "ma_gap_pct": -8.436,
+              "rsi_to_overbought": 45.4,
+              "price_to_trend_pct": -33.334,
+              "adx_to_min": 10.21
+            },
+            "strength": 0.0
+          }
+        },
+        {
+          "timestamp": 1783019169.64572,
+          "product_id": "BTC-USD",
+          "action": "HOLD",
+          "price": 61612.06,
+          "reason": "No crossover. Fast MA below slow MA; RSI 37.3 is neutral.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 62132.34,
+              "slow_sma": 66324.47,
+              "prev_fast_sma": 62360.85,
+              "prev_slow_sma": 66584.18,
+              "rsi": 37.32,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 78325.94,
+              "atr": 2317.54,
+              "adx": 36.91,
+              "sentiment_score": 0.0,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "ma_gap_pct": -6.321,
+              "rsi_to_overbought": 47.68,
+              "price_to_trend_pct": -23.446,
+              "adx_to_min": 16.91
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1783013058.357379,
           "product_id": "ETH-USD",
@@ -4632,76 +4702,6 @@
           "product_id": "BTC-USD",
           "action": "HOLD",
           "price": 59549.38,
-          "reason": "No crossover. Fast MA below slow MA; RSI 30.6 is neutral.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 63038.63,
-              "slow_sma": 67188.68,
-              "prev_fast_sma": 63413.86,
-              "prev_slow_sma": 67503.57,
-              "rsi": 30.65,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 78874.4,
-              "atr": 2252.78,
-              "adx": 36.37,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "ma_gap_pct": -6.177,
-              "rsi_to_overbought": 54.35,
-              "price_to_trend_pct": -24.597,
-              "adx_to_min": 16.37
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1782737718.7886708,
-          "product_id": "ETH-USD",
-          "action": "HOLD",
-          "price": 1573.52,
-          "reason": "No crossover. Fast MA below slow MA; RSI 31.5 is neutral.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 1684.18,
-              "slow_sma": 1842.19,
-              "prev_fast_sma": 1696.26,
-              "prev_slow_sma": 1853.32,
-              "rsi": 31.5,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 2437.24,
-              "atr": 80.77,
-              "adx": 33.12,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "ma_gap_pct": -8.577,
-              "rsi_to_overbought": 53.5,
-              "price_to_trend_pct": -35.607,
-              "adx_to_min": 13.12
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1782737718.635696,
-          "product_id": "BTC-USD",
-          "action": "HOLD",
-          "price": 59840.01,
           "reason": "No crossover. Fast MA below slow MA; RSI 30.6 is neutral.",
           "outcome": "hold",
           "reject_code": "no_signal",
@@ -7655,6 +7655,12 @@
           "cash": 10000.0,
           "market_value": 0.0,
           "equity": 10000.0
+        },
+        {
+          "timestamp": 1783019169.8415117,
+          "cash": 10000.0,
+          "market_value": 0.0,
+          "equity": 10000.0
         }
       ],
       "trades": []
@@ -7677,7 +7683,7 @@
       "latest_signals": {
         "BTC-USD": {
           "action": "HOLD",
-          "price": 61825.97,
+          "price": 61612.06,
           "strength": 0.0,
           "reasons": [
             "RSI 37.3 is between 30 and 55 \u2014 no edge, holding.",
@@ -7700,7 +7706,7 @@
         },
         "SOL-USD": {
           "action": "SELL",
-          "price": 81.03,
+          "price": 80.92,
           "strength": 0.59,
           "reasons": [
             "RSI 59.1 \u2265 55 \u2014 reverted to the mean, taking profit.",
@@ -7723,6 +7729,54 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1783019170.0213418,
+          "product_id": "SOL-USD",
+          "action": "SELL",
+          "price": 80.92,
+          "reason": "RSI 59.1 \u2265 55 \u2014 reverted to the mean, taking profit.",
+          "outcome": "hold",
+          "reject_code": "no_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "rsi": 59.08,
+              "rsi_period": 14,
+              "atr": 4.39,
+              "sentiment_score": 0.0,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "rsi_to_oversold": 29.08,
+              "rsi_to_overbought": -4.08
+            },
+            "strength": 0.59
+          }
+        },
+        {
+          "timestamp": 1783019169.8511202,
+          "product_id": "BTC-USD",
+          "action": "HOLD",
+          "price": 61612.06,
+          "reason": "RSI 37.3 is between 30 and 55 \u2014 no edge, holding.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "rsi": 37.32,
+              "rsi_period": 14,
+              "atr": 2317.54,
+              "sentiment_score": 0.0,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "rsi_to_oversold": 7.32,
+              "rsi_to_overbought": 17.68
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1783013058.5838184,
           "product_id": "SOL-USD",
@@ -9096,54 +9150,6 @@
           "product_id": "BTC-USD",
           "action": "HOLD",
           "price": 59549.38,
-          "reason": "RSI 30.6 is between 30 and 55 \u2014 no edge, holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "rsi": 30.65,
-              "rsi_period": 14,
-              "atr": 2252.78,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "rsi_to_oversold": 0.65,
-              "rsi_to_overbought": 24.35
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1782737718.9216843,
-          "product_id": "SOL-USD",
-          "action": "HOLD",
-          "price": 73.27,
-          "reason": "RSI 48.5 is between 30 and 55 \u2014 no edge, holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "rsi": 48.49,
-              "rsi_period": 14,
-              "atr": 4.15,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "rsi_to_oversold": 18.49,
-              "rsi_to_overbought": 6.51
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1782737718.7993526,
-          "product_id": "BTC-USD",
-          "action": "HOLD",
-          "price": 59840.01,
           "reason": "RSI 30.6 is between 30 and 55 \u2014 no edge, holding.",
           "outcome": "hold",
           "reject_code": "no_signal",
@@ -12086,6 +12092,12 @@
           "cash": 9925.617402749485,
           "market_value": 0.0,
           "equity": 9925.617402749485
+        },
+        {
+          "timestamp": 1783019170.0227203,
+          "cash": 9925.617402749485,
+          "market_value": 0.0,
+          "equity": 9925.617402749485
         }
       ],
       "trades": [
@@ -12229,26 +12241,26 @@
       ],
       "starting_cash": 10000,
       "cash": 8624.21477187539,
-      "market_value": 873.2343884858226,
-      "equity": 9497.449160361211,
-      "total_return_pct": -5.02550839638789,
+      "market_value": 872.048953674846,
+      "equity": 9496.263725550236,
+      "total_return_pct": -5.037362744497642,
       "realized_pnl": -432.6025254117982,
-      "unrealized_pnl": 35.524032747339255,
+      "unrealized_pnl": 34.33859793636258,
       "positions": [
         {
           "product_id": "SOL-USD",
           "quantity": 10.776680099788011,
           "side": "long",
           "avg_price": 77.27,
-          "price": 81.03,
-          "value": 873.2343884858226,
-          "unrealized_pnl": 40.520317175202976
+          "price": 80.92,
+          "value": 872.048953674846,
+          "unrealized_pnl": 39.3348823642263
         }
       ],
       "latest_signals": {
         "ETH-USD": {
           "action": "HOLD",
-          "price": 1702.08,
+          "price": 1698.4,
           "strength": 0.0,
           "reasons": [
             "Price $1,607.64 inside the channel ($1,510.00 \u2013 $1,848.42) \u2014 holding.",
@@ -12272,7 +12284,7 @@
         },
         "SOL-USD": {
           "action": "BUY",
-          "price": 81.03,
+          "price": 80.92,
           "strength": 0.78,
           "reasons": [
             "Breakout: price $77.38 broke above the 20-bar high $76.33 \u2014 momentum entry.",
@@ -12296,6 +12308,56 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1783019170.034094,
+          "product_id": "SOL-USD",
+          "action": "BUY",
+          "price": 80.92,
+          "reason": "Breakout: price $77.38 broke above the 20-bar high $76.33 \u2014 momentum entry.",
+          "outcome": "hold",
+          "reject_code": "in_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "donchian_upper": 76.33,
+              "donchian_lower": 63.94,
+              "donchian_period": 20,
+              "atr": 4.39,
+              "sentiment_score": 0.0,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "breakout_dist_pct": 1.376,
+              "exit_dist_pct": 21.02
+            },
+            "strength": 0.78
+          }
+        },
+        {
+          "timestamp": 1783019170.0317116,
+          "product_id": "ETH-USD",
+          "action": "HOLD",
+          "price": 1698.4,
+          "reason": "Price $1,607.64 inside the channel ($1,510.00 \u2013 $1,848.42) \u2014 holding.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "donchian_upper": 1848.42,
+              "donchian_lower": 1510.0,
+              "donchian_period": 20,
+              "atr": 81.02,
+              "sentiment_score": 0.0,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "breakout_dist_pct": -13.026,
+              "exit_dist_pct": 6.466
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1783013058.596673,
           "product_id": "SOL-USD",
@@ -13726,56 +13788,6 @@
           "product_id": "ETH-USD",
           "action": "HOLD",
           "price": 1573.53,
-          "reason": "Price $1,569.41 inside the channel ($1,510.00 \u2013 $1,848.42) \u2014 holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "donchian_upper": 1848.42,
-              "donchian_lower": 1510.0,
-              "donchian_period": 20,
-              "atr": 80.77,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "breakout_dist_pct": -15.095,
-              "exit_dist_pct": 3.934
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1782737718.9328454,
-          "product_id": "SOL-USD",
-          "action": "HOLD",
-          "price": 73.27,
-          "reason": "Price $71.28 inside the channel ($63.94 \u2013 $76.05) \u2014 holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "donchian_upper": 76.05,
-              "donchian_lower": 63.94,
-              "donchian_period": 20,
-              "atr": 4.15,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "breakout_dist_pct": -6.272,
-              "exit_dist_pct": 11.48
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1782737718.930937,
-          "product_id": "ETH-USD",
-          "action": "HOLD",
-          "price": 1573.52,
           "reason": "Price $1,569.41 inside the channel ($1,510.00 \u2013 $1,848.42) \u2014 holding.",
           "outcome": "hold",
           "reject_code": "no_signal",
@@ -16719,6 +16731,12 @@
           "cash": 8624.21477187539,
           "market_value": 873.2343884858226,
           "equity": 9497.449160361211
+        },
+        {
+          "timestamp": 1783019170.0350802,
+          "cash": 8624.21477187539,
+          "market_value": 872.048953674846,
+          "equity": 9496.263725550236
         }
       ],
       "trades": [
@@ -17026,35 +17044,35 @@
       ],
       "starting_cash": 10000,
       "cash": 12462.248379958517,
-      "market_value": -2505.77631299749,
-      "equity": 9956.472066961027,
-      "total_return_pct": -0.4352793303897262,
+      "market_value": -2498.464799085973,
+      "equity": 9963.783580872543,
+      "total_return_pct": -0.3621641912745721,
       "realized_pnl": -39.16165887110671,
-      "unrealized_pnl": -4.3662741678681725,
+      "unrealized_pnl": 2.9452397436486484,
       "positions": [
         {
           "product_id": "BTC-USD",
           "quantity": -0.023603053290973723,
           "side": "short",
           "avg_price": 62280.69,
-          "price": 61825.97,
-          "value": -1459.2816646761428,
-          "unrealized_pnl": 10.732780392471598
+          "price": 61612.06,
+          "value": -1454.2327355466705,
+          "unrealized_pnl": 15.78170952194387
         },
         {
           "product_id": "ETH-USD",
           "quantity": -0.6148328212077854,
           "side": "short",
           "avg_price": 1702.08,
-          "price": 1702.08,
-          "value": -1046.4946483213473,
-          "unrealized_pnl": -0.0
+          "price": 1698.4,
+          "value": -1044.2320635393028,
+          "unrealized_pnl": 2.2625847820445495
         }
       ],
       "latest_signals": {
         "BTC-USD": {
           "action": "SELL",
-          "price": 61825.97,
+          "price": 61612.06,
           "strength": 1.0,
           "reasons": [
             "Fast EMA(20) below slow EMA(50) (62132.34 < 66324.47) \u2014 short the downtrend.",
@@ -17088,7 +17106,7 @@
         },
         "ETH-USD": {
           "action": "SELL",
-          "price": 1702.08,
+          "price": 1698.4,
           "strength": 1.0,
           "reasons": [
             "Fast EMA(20) below slow EMA(50) (1661.27 < 1814.33) \u2014 short the downtrend.",
@@ -17122,6 +17140,78 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1783019170.047379,
+          "product_id": "ETH-USD",
+          "action": "SELL",
+          "price": 1698.4,
+          "reason": "Fast EMA(20) below slow EMA(50) (1661.27 < 1814.33) \u2014 short the downtrend.",
+          "outcome": "hold",
+          "reject_code": "in_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 1661.27,
+              "slow_sma": 1814.33,
+              "prev_fast_sma": 1666.92,
+              "prev_slow_sma": 1822.77,
+              "rsi": 39.6,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 2411.47,
+              "atr": 81.02,
+              "adx": 30.21,
+              "sentiment_score": 0.0,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "ma_gap_pct": -8.436,
+              "rsi_to_overbought": 45.4,
+              "rsi_to_oversold": 24.6,
+              "price_to_trend_pct": -33.334,
+              "adx_to_min": 10.21
+            },
+            "strength": 1.0
+          }
+        },
+        {
+          "timestamp": 1783019170.0444632,
+          "product_id": "BTC-USD",
+          "action": "SELL",
+          "price": 61612.06,
+          "reason": "Fast EMA(20) below slow EMA(50) (62132.34 < 66324.47) \u2014 short the downtrend.",
+          "outcome": "hold",
+          "reject_code": "in_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 62132.34,
+              "slow_sma": 66324.47,
+              "prev_fast_sma": 62360.85,
+              "prev_slow_sma": 66584.18,
+              "rsi": 37.32,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 78325.94,
+              "atr": 2317.54,
+              "adx": 36.91,
+              "sentiment_score": 0.0,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "ma_gap_pct": -6.321,
+              "rsi_to_overbought": 47.68,
+              "rsi_to_oversold": 22.32,
+              "price_to_trend_pct": -23.446,
+              "adx_to_min": 16.91
+            },
+            "strength": 1.0
+          }
+        },
         {
           "timestamp": 1783013058.611208,
           "product_id": "ETH-USD",
@@ -19209,78 +19299,6 @@
             },
             "strength": 1.0
           }
-        },
-        {
-          "timestamp": 1782737718.9451091,
-          "product_id": "ETH-USD",
-          "action": "SELL",
-          "price": 1573.52,
-          "reason": "Fast EMA(20) below slow EMA(50) (1684.18 < 1842.19) \u2014 short the downtrend.",
-          "outcome": "hold",
-          "reject_code": "in_position",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 1684.18,
-              "slow_sma": 1842.19,
-              "prev_fast_sma": 1696.26,
-              "prev_slow_sma": 1853.32,
-              "rsi": 31.5,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 2437.24,
-              "atr": 80.77,
-              "adx": 33.12,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "ma_gap_pct": -8.577,
-              "rsi_to_overbought": 53.5,
-              "rsi_to_oversold": 16.5,
-              "price_to_trend_pct": -35.607,
-              "adx_to_min": 13.12
-            },
-            "strength": 1.0
-          }
-        },
-        {
-          "timestamp": 1782737718.9429314,
-          "product_id": "BTC-USD",
-          "action": "SELL",
-          "price": 59840.01,
-          "reason": "Fast EMA(20) below slow EMA(50) (63038.63 < 67188.68) \u2014 short the downtrend.",
-          "outcome": "hold",
-          "reject_code": "in_position",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 63038.63,
-              "slow_sma": 67188.68,
-              "prev_fast_sma": 63413.86,
-              "prev_slow_sma": 67503.57,
-              "rsi": 30.65,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 78874.4,
-              "atr": 2252.78,
-              "adx": 36.37,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "ma_gap_pct": -6.177,
-              "rsi_to_overbought": 54.35,
-              "rsi_to_oversold": 15.65,
-              "price_to_trend_pct": -24.597,
-              "adx_to_min": 16.37
-            },
-            "strength": 1.0
-          }
         }
       ],
       "equity_curve": [
@@ -19829,6 +19847,12 @@
           "cash": 12462.248379958517,
           "market_value": -2505.77631299749,
           "equity": 9956.472066961027
+        },
+        {
+          "timestamp": 1783019170.048383,
+          "cash": 12462.248379958517,
+          "market_value": -2498.464799085973,
+          "equity": 9963.783580872543
         }
       ],
       "trades": [
@@ -19981,7 +20005,7 @@
       "latest_signals": {
         "BTC-USD": {
           "action": "SELL",
-          "price": 61825.97,
+          "price": 61612.06,
           "strength": 1.0,
           "reasons": [
             "Price $59,961.45 broke below the 200-period trend MA $78,325.94 \u2014 regime break, moving to cash."
@@ -20001,7 +20025,7 @@
         },
         "ETH-USD": {
           "action": "SELL",
-          "price": 1702.08,
+          "price": 1698.4,
           "strength": 1.0,
           "reasons": [
             "Price $1,607.64 broke below the 200-period trend MA $2,411.47 \u2014 regime break, moving to cash."
@@ -20021,6 +20045,48 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1783019170.0569105,
+          "product_id": "ETH-USD",
+          "action": "SELL",
+          "price": 1698.4,
+          "reason": "Price $1,607.64 broke below the 200-period trend MA $2,411.47 \u2014 regime break, moving to cash.",
+          "outcome": "hold",
+          "reject_code": "no_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "trend_ma": 2411.47,
+              "trend_period": 200,
+              "atr": 81.02
+            },
+            "thresholds": {
+              "price_to_trend_pct": -33.334
+            },
+            "strength": 1.0
+          }
+        },
+        {
+          "timestamp": 1783019170.0549226,
+          "product_id": "BTC-USD",
+          "action": "SELL",
+          "price": 61612.06,
+          "reason": "Price $59,961.45 broke below the 200-period trend MA $78,325.94 \u2014 regime break, moving to cash.",
+          "outcome": "hold",
+          "reject_code": "no_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "trend_ma": 78325.94,
+              "trend_period": 200,
+              "atr": 2317.54
+            },
+            "thresholds": {
+              "price_to_trend_pct": -23.446
+            },
+            "strength": 1.0
+          }
+        },
         {
           "timestamp": 1783013058.6215615,
           "product_id": "ETH-USD",
@@ -21238,48 +21304,6 @@
             },
             "strength": 1.0
           }
-        },
-        {
-          "timestamp": 1782737718.9539003,
-          "product_id": "ETH-USD",
-          "action": "SELL",
-          "price": 1573.52,
-          "reason": "Price $1,569.41 broke below the 200-period trend MA $2,437.24 \u2014 regime break, moving to cash.",
-          "outcome": "hold",
-          "reject_code": "no_position",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "trend_ma": 2437.24,
-              "trend_period": 200,
-              "atr": 80.77
-            },
-            "thresholds": {
-              "price_to_trend_pct": -35.607
-            },
-            "strength": 1.0
-          }
-        },
-        {
-          "timestamp": 1782737718.9521515,
-          "product_id": "BTC-USD",
-          "action": "SELL",
-          "price": 59840.01,
-          "reason": "Price $59,474.01 broke below the 200-period trend MA $78,874.40 \u2014 regime break, moving to cash.",
-          "outcome": "hold",
-          "reject_code": "no_position",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "trend_ma": 78874.4,
-              "trend_period": 200,
-              "atr": 2252.78
-            },
-            "thresholds": {
-              "price_to_trend_pct": -24.597
-            },
-            "strength": 1.0
-          }
         }
       ],
       "equity_curve": [
@@ -21825,6 +21849,12 @@
         },
         {
           "timestamp": 1783013058.622602,
+          "cash": 10000.0,
+          "market_value": 0.0,
+          "equity": 10000.0
+        },
+        {
+          "timestamp": 1783019170.057883,
           "cash": 10000.0,
           "market_value": 0.0,
           "equity": 10000.0
