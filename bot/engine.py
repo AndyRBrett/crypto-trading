@@ -17,7 +17,7 @@ import time
 from .config import Config
 from .coordinate import Coordinator
 from .explain import Explainer
-from .market_data import MarketData, closed_candles
+from .market_data import _GRANULARITY_SECONDS, MarketData, closed_candles
 from .notifier import Notifier
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
 from .publish import Publisher
@@ -40,8 +40,11 @@ IN_POSITION = "in_position"        # holding; no protective exit or SELL fired
 MAX_OPEN_POSITIONS = "max_open_positions"  # BUY blocked: at max concurrent positions
 SIZE_ZERO = "size_zero"            # BUY sized to ~0 by risk limits / dust floor
 INSUFFICIENT_BALANCE = "insufficient_balance"  # BUY rejected: not enough cash
+REENTRY_COOLDOWN = "reentry_cooldown"  # entry blocked: too soon after a stop-out
 # reject_codes that mean "we wanted to BUY but couldn't" vs. "no actionable signal".
-_REJECTED_CODES = frozenset({MAX_OPEN_POSITIONS, SIZE_ZERO, INSUFFICIENT_BALANCE})
+_REJECTED_CODES = frozenset(
+    {MAX_OPEN_POSITIONS, SIZE_ZERO, INSUFFICIENT_BALANCE, REENTRY_COOLDOWN}
+)
 
 
 class Engine:
@@ -295,6 +298,9 @@ class Engine:
             return None, IN_POSITION
 
         if signal.action == BUY:
+            if self._in_reentry_cooldown(product_id):
+                log.info("%s: in post-stop re-entry cooldown, skipping BUY", product_id)
+                return None, REENTRY_COOLDOWN
             if self._at_max_positions():
                 log.info("%s: at max open positions, skipping BUY", product_id)
                 return None, MAX_OPEN_POSITIONS
@@ -306,6 +312,9 @@ class Engine:
             return trade, ACTED if trade else INSUFFICIENT_BALANCE
 
         if signal.action == SELL and getattr(self.config, "allow_short", False):
+            if self._in_reentry_cooldown(product_id):
+                log.info("%s: in post-stop re-entry cooldown, skipping SHORT", product_id)
+                return None, REENTRY_COOLDOWN
             if self._at_max_positions():
                 log.info("%s: at max open positions, skipping SHORT", product_id)
                 return None, MAX_OPEN_POSITIONS
@@ -317,6 +326,19 @@ class Engine:
             return trade, ACTED if trade else INSUFFICIENT_BALANCE
 
         return None, NO_POSITION if signal.action == SELL else NO_SIGNAL
+
+    def _in_reentry_cooldown(self, product_id: str) -> bool:
+        """True while new entries in this product are blocked after a stop-out.
+
+        Bar length comes from the configured candle granularity; the stop-exit
+        timestamp comes from the replayed trade log (see
+        risk.reentry_cooldown_active), so this is restart-safe. Off by default
+        (``reentry_cooldown_bars: 0``) — existing behavior is unchanged.
+        """
+        span = _GRANULARITY_SECONDS.get(self.config.candle_granularity, 0)
+        return risk.reentry_cooldown_active(
+            self.config, self.portfolio.trades, product_id, time.time(), span
+        )
 
     def _at_max_positions(self) -> bool:
         """True once the portfolio holds the max concurrent positions (either

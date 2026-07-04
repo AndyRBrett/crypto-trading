@@ -14,6 +14,42 @@ from typing import Sequence
 # Notional below which a trade is ignored as dust (USD).
 DUST_NOTIONAL = 10.0
 
+# Every stop exit reason starts with this (long: "Stop-loss:", short:
+# "Stop-loss (short):"), including trailing-stop exits — it's the contract the
+# re-entry cooldown keys off, so keep protective_exit_reason in sync.
+STOP_REASON_PREFIX = "Stop-loss"
+
+
+def reentry_cooldown_active(
+    cfg, trades, product_id: str, now: float, bar_seconds: float
+) -> bool:
+    """True while a product is inside the post-stop-out re-entry cooldown.
+
+    After a protective stop closes a position, level-triggered re-entry
+    (``allow_trend_reentry``) re-arms on the very next tick — observed live as
+    a stop-out followed by a re-entry at a *worse* price two hours later. With
+    ``cfg.reentry_cooldown_bars > 0``, new entries in that product are blocked
+    until that many bars have passed since the stop exit.
+
+    Derived purely from the persisted trade log (the most recent fill for the
+    product being a stop exit inside the window), so it survives restarts and
+    the fresh-VM-per-tick cloud runs — no extra state to persist. A normal
+    exit (take-profit / strategy SELL) resets nothing: only stops start a
+    cooldown. Disabled by default (``reentry_cooldown_bars = 0``).
+    """
+    bars = getattr(cfg, "reentry_cooldown_bars", 0) or 0
+    if bars <= 0 or not bar_seconds:
+        return False
+    last = None
+    for t in trades:
+        if t.product_id == product_id and (last is None or t.timestamp > last.timestamp):
+            last = t
+    if last is None or not last.reasons:
+        return False
+    if not str(last.reasons[0]).startswith(STOP_REASON_PREFIX):
+        return False
+    return (now - last.timestamp) < bars * bar_seconds
+
 
 def position_size(
     cfg,

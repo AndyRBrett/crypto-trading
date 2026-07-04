@@ -121,6 +121,11 @@ stop_loss_atr_mult: 2.0      # initial stop = entry - 2 * ATR
 take_profit_atr_mult: 6.0    # target = entry + 6 * ATR (3:1 reward:risk; daily sweep favors this)
 trailing_stop: true          # ride winners with a Chandelier trailing stop
 fallback_stop_pct: 0.08      # stop distance when ATR isn't available
+# Bars to block NEW entries in a product after a protective stop closed a
+# position there. Level-triggered re-entry otherwise re-arms on the very next
+# tick — observed live as a stop-out re-shorted 2h later at a worse price.
+# 0 disables (default): behavior is exactly as before. Overridable per account.
+reentry_cooldown_bars: 0
 
 # Claude trade explanations.
 explanations_enabled: true

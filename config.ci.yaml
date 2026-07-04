@@ -91,6 +91,11 @@ stop_loss_atr_mult: 2.0
 take_profit_atr_mult: 6.0   # 3:1 reward:risk; daily sweep favors wider targets
 trailing_stop: true
 fallback_stop_pct: 0.08
+# Post-stop-out re-entry cooldown (bars). OFF (0) = current behavior; set to
+# e.g. 1 to make a product sit out one daily bar after a protective stop
+# before a new entry is allowed (stops the stop-out -> instant-re-entry
+# whipsaw seen on long_short 2026-07-02).
+reentry_cooldown_bars: 0
 
 # News sentiment (needs the ANTHROPIC_API_KEY Actions secret; safe no-op without).
 sentiment_enabled: true

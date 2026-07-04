@@ -78,6 +78,14 @@ def run_backtest(
     max_dd = 0.0
 
     candles = list(candles)
+    # Bar length for the post-stop re-entry cooldown (parity with the live
+    # engine); inferred from the candle spacing so the backtest doesn't need
+    # a granularity string.
+    bar_seconds = (
+        candles[1]["time"] - candles[0]["time"]
+        if len(candles) > 1 and "time" in candles[0] and "time" in candles[1]
+        else 0
+    )
     for i in range(min_c, len(candles)):
         window = candles[max(0, i + 1 - window_cap): i + 1]  # bounded history
         bar = candles[i]
@@ -118,19 +126,25 @@ def run_backtest(
                     BUY, product_id, price, -pos.quantity, timestamp=ts, reasons=[reason]
                 )
         elif signal.action == BUY:
-            equity = portfolio.total_equity(prices)
-            qty = risk.position_size(config, equity, portfolio.cash, price, atr)
-            if qty > 0:
-                portfolio.execute(
-                    BUY, product_id, price, qty, timestamp=ts, reasons=signal.reasons
-                )
+            if risk.reentry_cooldown_active(config, portfolio.trades, product_id, ts, bar_seconds):
+                pass  # too soon after a stop-out (same gate as the live engine)
+            else:
+                equity = portfolio.total_equity(prices)
+                qty = risk.position_size(config, equity, portfolio.cash, price, atr)
+                if qty > 0:
+                    portfolio.execute(
+                        BUY, product_id, price, qty, timestamp=ts, reasons=signal.reasons
+                    )
         elif signal.action == SELL and allow_short:
-            equity = portfolio.total_equity(prices)
-            qty = risk.position_size(config, equity, portfolio.cash, price, atr, direction="short")
-            if qty > 0:
-                portfolio.execute(
-                    SELL, product_id, price, qty, timestamp=ts, reasons=signal.reasons
-                )
+            if risk.reentry_cooldown_active(config, portfolio.trades, product_id, ts, bar_seconds):
+                pass  # too soon after a stop-out (same gate as the live engine)
+            else:
+                equity = portfolio.total_equity(prices)
+                qty = risk.position_size(config, equity, portfolio.cash, price, atr, direction="short")
+                if qty > 0:
+                    portfolio.execute(
+                        SELL, product_id, price, qty, timestamp=ts, reasons=signal.reasons
+                    )
 
         equity = portfolio.total_equity(prices)
         peak_equity = max(peak_equity, equity)

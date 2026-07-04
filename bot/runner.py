@@ -123,6 +123,7 @@ class Runner:
             trailing_stop=pick(acct.trailing_stop, base.trailing_stop),
             fallback_stop_pct=pick(acct.fallback_stop_pct, base.fallback_stop_pct),
             allow_short=pick(acct.allow_short, base.allow_short),
+            reentry_cooldown_bars=pick(acct.reentry_cooldown_bars, base.reentry_cooldown_bars),
             # The Runner publishes/coordinates once per tick, not per engine.
             publish_enabled=False,
             coordinate_enabled=False,

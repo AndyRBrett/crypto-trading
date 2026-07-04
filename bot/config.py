@@ -49,6 +49,7 @@ class AccountConfig:
     trailing_stop: bool | None = None
     fallback_stop_pct: float | None = None
     allow_short: bool | None = None  # enable short selling for this account
+    reentry_cooldown_bars: int | None = None  # bars to wait after a stop-out
 
     def resolved_db_path(self) -> str:
         return self.db_path or f"trading.{_sanitize_name(self.name)}.db"
@@ -109,6 +110,11 @@ class Config:
     trailing_stop: bool = True  # ride winners with a Chandelier trailing stop
     fallback_stop_pct: float = 0.08  # stop distance when ATR isn't available
     allow_short: bool = False  # allow opening short positions (long-only by default)
+    # Bars to block NEW entries in a product after a protective stop closed a
+    # position there (level-triggered re-entry otherwise re-arms immediately —
+    # observed live as a stop-out re-shorted 2h later at a worse price).
+    # 0 = disabled (default): behavior is exactly as before.
+    reentry_cooldown_bars: int = 0
 
     # Claude trade explanations.
     explanations_enabled: bool = True
