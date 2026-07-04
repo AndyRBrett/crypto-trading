@@ -299,7 +299,10 @@ class Storage:
                 }
             )
 
-        recent = self.load_trades()[-50:][::-1]
+        # The replayed portfolio's trades, not a fresh load_trades(): the replay
+        # normalizes realized_pnl to the current formula (see
+        # Portfolio.from_trades), so the trade list matches the P&L totals.
+        recent = portfolio.trades[-50:][::-1]
         equity = portfolio.total_equity(prices)
         return {
             "name": name,

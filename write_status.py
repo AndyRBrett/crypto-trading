@@ -52,6 +52,7 @@ import time
 from datetime import datetime, timezone
 
 from bot.metrics import RISK_WINDOW_DAYS, risk_metrics
+from bot.portfolio import Portfolio, Trade, closing_legs
 
 WINDOW_DAYS = 7
 # Longer windows reported alongside the headline 7-day metrics (issue #20).
@@ -125,10 +126,12 @@ def _aggregate_equity(series: list[list[tuple[float, float]]]) -> list[tuple[flo
 def collect_metrics(now: float | None = None) -> dict:
     """Build the status payload from the trade store(s).
 
-    A SELL closes a position in this bot, so each SELL is one completed round
-    trip; win rate is the share of those that realized a profit. Realized P&L is
-    recorded on SELLs, so the window P&L is the sum of ``realized_pnl`` for
-    SELLs whose timestamp falls in the window.
+    A completed round trip is any *closing leg* — a SELL closing a long or,
+    since shorting landed, a BUY covering a short (realized P&L rides on the
+    closing fill either way). Win rate is the share of closing legs that
+    realized a profit; window P&L sums their realized P&L. Each store's log is
+    replayed through ``Portfolio.from_trades`` first so pre-fee-fix rows are
+    normalized to the current P&L formula instead of mixing two conventions.
     """
     now = time.time() if now is None else now
     windows = (WINDOW_DAYS, *EXTRA_WINDOW_DAYS)
@@ -148,8 +151,8 @@ def collect_metrics(now: float | None = None) -> dict:
     # Per-window accumulators keyed by window length in days.
     fills = {d: 0 for d in windows}    # all fills (BUY+SELL) in the window
     pnl = {d: 0.0 for d in windows}    # summed realized P&L over the window
-    closed = {d: 0 for d in windows}   # closed (SELL) trades in the window
-    wins = {d: 0 for d in windows}     # closed trades that realized a profit
+    closed = {d: 0 for d in windows}   # closing legs (long exit / short cover)
+    wins = {d: 0 for d in windows}     # closing legs that realized a profit
     last_fill: float | None = None  # most recent fill across all history
     signals_evaluated = 0     # signals scored in the run that just executed
     signals_acted = 0         # those that actually became a trade this run
@@ -176,7 +179,7 @@ def collect_metrics(now: float | None = None) -> dict:
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT timestamp, product_id, side, price, quantity, realized_pnl "
+                "SELECT timestamp, product_id, side, price, quantity, fee "
                 "FROM trades"
             ).fetchall()
             try:
@@ -207,28 +210,49 @@ def collect_metrics(now: float | None = None) -> dict:
         signals_evaluated += sum(1 for r in sig_rows if r["timestamp"] >= run_since)
         for r in sig_rows:
             _mark(r["product_id"], r["timestamp"], r["price"])
-        for r in rows:
-            ts = r["timestamp"]
+        # Replay the store's log so realized P&L is uniformly on the current
+        # formula, then classify each fill as an opening or closing leg —
+        # direction-agnostic, so short covers (BUY legs) are counted correctly.
+        store_trades = Portfolio.from_trades(
+            0.0,
+            0.0,
+            [
+                Trade(
+                    timestamp=r["timestamp"],
+                    product_id=r["product_id"],
+                    side=r["side"],
+                    price=r["price"],
+                    quantity=r["quantity"],
+                    fee=r["fee"],
+                    cash_after=0.0,
+                )
+                for r in rows
+            ],
+        ).trades
+        closers = {id(t) for t in closing_legs(store_trades)}
+        for t in store_trades:
+            ts = t.timestamp
             if last_fill is None or ts > last_fill:
                 last_fill = ts
             # A fill in the run window is a signal that was acted on this run.
             if ts >= run_since:
                 signals_acted += 1
             if ts >= head_start:
-                # Every fill is also a mark for the benchmark, and BUYs are the
-                # capital the strategy deployed (its buy-and-hold weighting).
-                _mark(r["product_id"], ts, r["price"])
-                if r["side"] == "BUY":
-                    buy_notional[r["product_id"]] = (
-                        buy_notional.get(r["product_id"], 0.0) + r["price"] * r["quantity"]
+                # Every fill is also a mark for the benchmark, and opening legs
+                # (long entries and short entries alike) are the capital the
+                # strategy deployed — its buy-and-hold weighting.
+                _mark(t.product_id, ts, t.price)
+                if id(t) not in closers:
+                    buy_notional[t.product_id] = (
+                        buy_notional.get(t.product_id, 0.0) + t.price * t.quantity
                     )
             for d in windows:
                 if ts >= window_starts[d]:
                     fills[d] += 1
-                    if r["side"] == "SELL":
+                    if id(t) in closers:
                         closed[d] += 1
-                        pnl[d] += r["realized_pnl"]
-                        if r["realized_pnl"] > 0:
+                        pnl[d] += t.realized_pnl
+                        if t.realized_pnl > 0:
                             wins[d] += 1
 
     status: dict = {

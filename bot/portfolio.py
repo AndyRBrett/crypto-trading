@@ -233,11 +233,37 @@ class Portfolio:
     def from_trades(
         cls, starting_cash: float, fee_rate: float, trades: list[Trade]
     ) -> "Portfolio":
-        """Rebuild portfolio state by replaying a trade log (used on restart)."""
+        """Rebuild portfolio state by replaying a trade log (used on restart).
+
+        Each fill's cash/position effect is re-applied using the stored fee (no
+        recompute); the shared helper handles longs and shorts alike. The
+        replay's ``realized_pnl`` overwrites the logged value on each trade:
+        rows persisted before the fee-accounting fix (2026-06-18) carry P&L
+        computed without the entry-fee share, and trusting them would mix two
+        formulas in every realized-P&L total. The replay is the single source
+        of truth, so totals reconcile exactly with cash once flat.
+        """
         p = cls(starting_cash, fee_rate)
         for t in sorted(trades, key=lambda x: x.timestamp):
-            # Re-apply each fill's cash/position effect using the stored fee
-            # (no recompute); the shared helper handles longs and shorts alike.
-            p._apply(t.side, t.product_id, t.price, t.quantity, t.fee)
+            t.realized_pnl = p._apply(t.side, t.product_id, t.price, t.quantity, t.fee)
             p.trades.append(t)
         return p
+
+
+def closing_legs(trades: list[Trade]) -> list[Trade]:
+    """The fills that reduced an open position toward zero — one per exit.
+
+    A SELL closing a long or a BUY covering a short. Replaying the signed
+    position makes this direction-agnostic (long-only reduces to "every SELL"),
+    which is the correct way to count round trips / win rate now that shorts
+    realize their P&L on BUY legs. Shared by the backtester and write_status.
+    """
+    exits: list[Trade] = []
+    running: dict[str, float] = {}
+    for t in sorted(trades, key=lambda x: x.timestamp):
+        pos = running.get(t.product_id, 0.0)
+        signed = t.quantity if t.side == BUY else -t.quantity
+        if pos != 0 and (pos > 0) != (signed > 0):
+            exits.append(t)
+        running[t.product_id] = pos + signed
+    return exits

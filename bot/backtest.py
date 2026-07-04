@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 from . import risk
-from .portfolio import Portfolio
+from .portfolio import Portfolio, closing_legs
 from .strategy import BUY, SELL
 
 
@@ -148,15 +148,8 @@ def run_backtest(
 
     fees_paid = sum(t.fee for t in portfolio.trades)
     # A round-trip "exit" is any fill that reduces an open position toward zero —
-    # a SELL closing a long or a BUY covering a short. Replaying the signed
-    # position makes this direction-agnostic (long-only reduces to "every SELL").
-    exits = []
-    running = 0.0
-    for t in sorted(portfolio.trades, key=lambda x: x.timestamp):
-        signed = t.quantity if t.side == BUY else -t.quantity
-        if running != 0 and ((running > 0) != (signed > 0)):
-            exits.append(t)
-        running += signed
+    # a SELL closing a long or a BUY covering a short (see closing_legs).
+    exits = closing_legs(portfolio.trades)
     wins = sum(1 for t in exits if t.realized_pnl > 0)
     losses = sum(1 for t in exits if t.realized_pnl < 0)
     gross_win = sum(t.realized_pnl for t in exits if t.realized_pnl > 0)

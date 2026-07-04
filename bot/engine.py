@@ -222,13 +222,29 @@ class Engine:
 
         # Snapshot equity using fresh prices, then export dashboard state.
         if prices:
-            current_equity = self.portfolio.total_equity(prices)
-            self.storage.save_equity(
-                self.portfolio.cash,
-                self.portfolio.market_value(prices),
-                current_equity,
-            )
-            self._maybe_notify_new_high(current_equity)
+            # A failed candle fetch leaves that product out of `prices`, and
+            # market_value() silently values missing products at zero — an
+            # equity snapshot taken then would record a false dip (corrupting
+            # drawdown/Sharpe). Skip the snapshot unless every open position
+            # was priced this tick; the state export below still runs.
+            unpriced = [
+                pid
+                for pid, p in self.portfolio.positions.items()
+                if p.quantity != 0 and pid not in prices
+            ]
+            if unpriced:
+                log.warning(
+                    "skipping equity snapshot: no fresh price for open position(s) %s",
+                    unpriced,
+                )
+            else:
+                current_equity = self.portfolio.total_equity(prices)
+                self.storage.save_equity(
+                    self.portfolio.cash,
+                    self.portfolio.market_value(prices),
+                    current_equity,
+                )
+                self._maybe_notify_new_high(current_equity)
             self.storage.export_state(
                 self.config.dashboard_state_path,
                 self.config,

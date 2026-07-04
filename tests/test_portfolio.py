@@ -4,6 +4,8 @@ from bot.portfolio import (
     InsufficientFunds,
     InsufficientPosition,
     Portfolio,
+    Trade,
+    closing_legs,
 )
 from bot.strategy import BUY, SELL
 
@@ -171,3 +173,35 @@ def test_from_trades_replays_state():
     assert rebuilt.position("BTC-USD").quantity == pytest.approx(
         p.position("BTC-USD").quantity
     )
+
+
+def test_from_trades_recomputes_stale_realized_pnl():
+    # Rows persisted before the fee-accounting fix carry realized_pnl without
+    # the entry-fee share; the replay must overwrite them with the current
+    # formula so totals don't mix two conventions.
+    stale = [
+        Trade(timestamp=1.0, product_id="BTC-USD", side="BUY", price=100.0,
+              quantity=1.0, fee=2.0, cash_after=0.0, realized_pnl=0.0),
+        Trade(timestamp=2.0, product_id="BTC-USD", side="SELL", price=110.0,
+              quantity=1.0, fee=2.0, cash_after=0.0,
+              realized_pnl=8.0),  # old formula: 10 - exit fee only
+    ]
+    p = Portfolio.from_trades(10_000, 0.02, stale)
+    # Current formula: 10 - 2 (exit fee) - 2 (entry-fee share) = 6.
+    assert p.trades[1].realized_pnl == pytest.approx(6.0)
+    assert p.realized_pnl() == pytest.approx(6.0)
+
+
+def test_closing_legs_direction_agnostic():
+    p = Portfolio(10_000, 0.0)
+    # Long round trip: BUY opens, SELL closes.
+    p.execute("BUY", "BTC-USD", 100.0, 1.0, timestamp=1)
+    p.execute("SELL", "BTC-USD", 110.0, 1.0, timestamp=2)
+    # Short round trip: SELL opens, BUY covers.
+    p.execute("SELL", "ETH-USD", 100.0, 1.0, timestamp=3)
+    p.execute("BUY", "ETH-USD", 90.0, 1.0, timestamp=4)
+    legs = closing_legs(p.trades)
+    assert [(t.product_id, t.side) for t in legs] == [
+        ("BTC-USD", "SELL"), ("ETH-USD", "BUY"),
+    ]
+    assert all(t.realized_pnl == 10.0 for t in legs)
