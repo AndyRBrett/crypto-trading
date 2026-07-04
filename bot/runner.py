@@ -24,6 +24,7 @@ from .coordinate import Coordinator
 from .engine import Engine
 from .explain import Explainer
 from .market_data import MarketData
+from .portfolio_guard import PortfolioGuard
 from .publish import Publisher
 from .sentiment import SentimentAnalyzer
 from .storage import export_combined_state
@@ -83,6 +84,9 @@ class Runner:
             self.analyzer = SentimentAnalyzer(config)
 
         self.accounts = config.accounts
+        # One guard across all account engines: read-only exposure snapshot
+        # every tick, entry veto only when portfolio_guard_enabled is set.
+        self.portfolio_guard = PortfolioGuard(config)
         self.engines: list[tuple] = []  # (account, engine)
         for acct in self.accounts:
             acct_cfg = self._account_config(acct)
@@ -94,7 +98,9 @@ class Runner:
                 market_data=self.market_data,
                 explainer=self.explainer,
                 sentiment_analyzer=self.analyzer,
+                portfolio_guard=self.portfolio_guard,
             )
+            self.portfolio_guard.register(engine)
             self.engines.append((acct, engine))
 
     def _account_config(self, acct) -> Config:
@@ -148,6 +154,17 @@ class Runner:
         all_trades: list = []
         for acct, engine in self.engines:
             all_trades += engine.tick()
+
+        # Read-only exposure heartbeat: the combined footprint of all accounts,
+        # logged whether or not the veto is enabled.
+        snap = self.portfolio_guard.snapshot()
+        log.info(
+            "portfolio guard%s: gross long $%.2f, gross short $%.2f, net $%.2f "
+            "(equity $%.2f)",
+            "" if self.portfolio_guard.enabled else " (veto off)",
+            snap["gross_long"], snap["gross_short"], snap["net_exposure"],
+            snap["equity"],
+        )
 
         self._export_combined()
         if self.publisher.enabled:

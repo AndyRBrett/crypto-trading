@@ -127,6 +127,14 @@ fallback_stop_pct: 0.08      # stop distance when ATR isn't available
 # 0 disables (default): behavior is exactly as before. Overridable per account.
 reentry_cooldown_bars: 0
 
+# Cross-account portfolio guard. The combined gross exposure of ALL accounts
+# is computed and logged every tick regardless; enabling the guard makes it
+# also VETO any new entry that would push combined gross exposure above
+# max_gross_exposure_pct x combined equity. Exits/stops are never blocked.
+# Disabled by default — flipping this is the only way it changes behavior.
+portfolio_guard_enabled: false
+max_gross_exposure_pct: 1.5
+
 # Claude trade explanations.
 explanations_enabled: true
 explain_model: claude-opus-4-8   # falls back to a templated rationale if no API key

@@ -97,6 +97,13 @@ fallback_stop_pct: 0.08
 # whipsaw seen on long_short 2026-07-02).
 reentry_cooldown_bars: 0
 
+# Cross-account exposure guard: OFF = read-only (combined gross/net exposure
+# is still computed and logged each tick). Enable to veto new entries that
+# would push combined gross exposure over max_gross_exposure_pct x combined
+# equity across all five accounts. Never blocks exits.
+portfolio_guard_enabled: false
+max_gross_exposure_pct: 1.5
+
 # News sentiment (needs the ANTHROPIC_API_KEY Actions secret; safe no-op without).
 sentiment_enabled: true
 

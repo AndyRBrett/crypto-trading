@@ -116,6 +116,14 @@ class Config:
     # 0 = disabled (default): behavior is exactly as before.
     reentry_cooldown_bars: int = 0
 
+    # Cross-account portfolio guard (bot/portfolio_guard.py). The combined
+    # gross exposure across ALL accounts is always computed and logged; when
+    # enabled, NEW entries that would push combined gross exposure above
+    # max_gross_exposure_pct x combined equity are vetoed (exits are never
+    # touched). Disabled by default: no behavior change until flipped.
+    portfolio_guard_enabled: bool = False
+    max_gross_exposure_pct: float = 1.5
+
     # Claude trade explanations.
     explanations_enabled: bool = True
     explain_model: str = "claude-opus-4-8"

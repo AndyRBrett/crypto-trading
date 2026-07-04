@@ -41,9 +41,11 @@ MAX_OPEN_POSITIONS = "max_open_positions"  # BUY blocked: at max concurrent posi
 SIZE_ZERO = "size_zero"            # BUY sized to ~0 by risk limits / dust floor
 INSUFFICIENT_BALANCE = "insufficient_balance"  # BUY rejected: not enough cash
 REENTRY_COOLDOWN = "reentry_cooldown"  # entry blocked: too soon after a stop-out
+PORTFOLIO_EXPOSURE = "portfolio_exposure"  # entry vetoed: combined gross over cap
 # reject_codes that mean "we wanted to BUY but couldn't" vs. "no actionable signal".
 _REJECTED_CODES = frozenset(
-    {MAX_OPEN_POSITIONS, SIZE_ZERO, INSUFFICIENT_BALANCE, REENTRY_COOLDOWN}
+    {MAX_OPEN_POSITIONS, SIZE_ZERO, INSUFFICIENT_BALANCE, REENTRY_COOLDOWN,
+     PORTFOLIO_EXPOSURE}
 )
 
 
@@ -57,9 +59,15 @@ class Engine:
         sentiment_analyzer: SentimentAnalyzer | None = None,
         publisher: Publisher | None = None,
         coordinator: Coordinator | None = None,
+        portfolio_guard=None,
     ):
         self.config = config
         self.market_data = market_data or MarketData(config)
+        # Cross-account exposure guard (see bot/portfolio_guard.py). Only the
+        # multi-account Runner wires one in; None means no guard, and a
+        # disabled guard approves everything — either way entries behave as
+        # before until portfolio_guard_enabled is set.
+        self.portfolio_guard = portfolio_guard
         self.coordinator = coordinator or Coordinator(config)
         # Pull the shared portfolio before opening the local DB (only when we
         # create the storage ourselves; injected storage in tests is left alone).
@@ -308,6 +316,9 @@ class Engine:
             if qty <= 0:
                 log.info("%s: position size ~0 after risk limits, skipping BUY", product_id)
                 return None, SIZE_ZERO
+            veto = self._guard_vetoes_entry(product_id, qty * price, prices)
+            if veto:
+                return None, PORTFOLIO_EXPOSURE
             trade = self._buy(product_id, price, qty, signal.reasons, signal.indicators)
             return trade, ACTED if trade else INSUFFICIENT_BALANCE
 
@@ -322,10 +333,25 @@ class Engine:
             if qty <= 0:
                 log.info("%s: short size ~0 after risk limits, skipping", product_id)
                 return None, SIZE_ZERO
+            veto = self._guard_vetoes_entry(product_id, qty * price, prices)
+            if veto:
+                return None, PORTFOLIO_EXPOSURE
             trade = self._short(product_id, price, qty, signal.reasons, signal.indicators)
             return trade, ACTED if trade else INSUFFICIENT_BALANCE
 
         return None, NO_POSITION if signal.action == SELL else NO_SIGNAL
+
+    def _guard_vetoes_entry(self, product_id: str, notional: float, prices: dict) -> bool:
+        """Ask the cross-account guard about a NEW entry (never about exits).
+
+        No guard wired, or guard disabled -> never vetoes.
+        """
+        if self.portfolio_guard is None:
+            return False
+        ok, why = self.portfolio_guard.allows_entry(notional, prices)
+        if not ok:
+            log.info("%s: portfolio guard vetoed entry — %s", product_id, why)
+        return not ok
 
     def _in_reentry_cooldown(self, product_id: str) -> bool:
         """True while new entries in this product are blocked after a stop-out.
