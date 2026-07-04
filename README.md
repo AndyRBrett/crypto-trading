@@ -306,7 +306,12 @@ commented list). Highlights:
 Add an `accounts:` block to run several independent paper accounts side by side,
 each with its own strategy, markets, starting cash, and SQLite DB
 (`trading.<name>.db`) — all surfaced in one dashboard with per-account tabs and a
-portfolio-total summary. Omit `accounts:` to keep the original single-account
+portfolio-total summary. The Total tab shows a **strategy comparison table**
+(per-account equity, return, realized/unrealized P&L, win rate over completed
+round trips, profit factor, 30-day max drawdown/Sharpe, fees, open positions —
+from the per-account `stats` block the bot exports) plus a **combined exposure**
+line (gross long/short and net, by asset, summed across all accounts — the
+accounts trade independently, so this is where a correlated all-in lean shows up). Omit `accounts:` to keep the original single-account
 behavior. `strategy_type` selects the algorithm from the registry in
 `strategies.py`:
 

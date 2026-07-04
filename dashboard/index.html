@@ -128,6 +128,12 @@
 
   <div class="cards" id="cards"></div>
 
+  <section id="compareSection" style="display:none">
+    <h2>Strategy comparison<button class="info-btn inline" data-info="compare" aria-label="What does this mean?">i</button></h2>
+    <div class="table-wrap" id="compare"></div>
+    <p class="hint" id="exposure"></p>
+  </section>
+
   <div class="filter" id="filter"></div>
 
   <section>
@@ -524,6 +530,8 @@ const STRATEGY_INFO = {
   ema_crossover: { name: "EMA crossover", desc: "a trend-follower — buys when the fast moving average crosses above the slow one (in step with the long-term trend, confirmed by ADX and filtered by RSI) and sells when momentum rolls over." },
   rsi_mean_reversion: { name: "RSI mean reversion", desc: "a contrarian — buys when RSI shows the market is oversold and sells once price snaps back toward the middle, fading extremes instead of chasing them." },
   donchian_breakout: { name: "Donchian breakout", desc: "a breakout rider — buys when price pushes above its recent high (the prior N-bar channel) and exits when it falls below its recent low." },
+  trend_long_short: { name: "Trend long/short", desc: "a symmetric trend-follower — longs confirmed uptrends like the EMA crossover, and can also short confirmed downtrends, so it's the only sleeve that can profit while the market falls." },
+  regime: { name: "Regime filter", desc: "a stay-invested holder — keeps a full long position while price is above the 200-day trend average and moves entirely to cash when it breaks below, riding bull markets and sidestepping deep bears." },
 };
 
 function renderStrategyNote(state) {
@@ -564,9 +572,72 @@ function renderAccountTabs(state) {
   renderStrategyNote(state);
 }
 
+// Side-by-side comparison of every account: the numbers that answer "which
+// strategy is actually working?" in one table instead of five tabs. Trade
+// stats (win rate, round trips, profit factor, fees) come from the bot's
+// per-account `stats` block; drawdown/Sharpe are computed client-side from
+// each account's own equity curve with the same riskMetrics() the risk panel
+// uses. Shown on the Total tab only.
+function renderCompare(state) {
+  const section = document.getElementById("compareSection");
+  if (!section) return;
+  const accts = (state && state.accounts) || [];
+  if (selectedAccount !== "__total__" || accts.length < 2) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "";
+  const el = document.getElementById("compare");
+  const pctCell = (v) => v == null ? "—" : `<span class="${cls(v)}">${(v >= 0 ? "+" : "") + v.toFixed(2)}%</span>`;
+  const usdCell = (v) => v == null ? "—" : `<span class="${cls(v)}">${fmtUSD(v)}</span>`;
+  const rows = accts.map(a => {
+    const st = a.stats || {};
+    const m = riskMetrics(a.equity_curve) || {};
+    const info = STRATEGY_INFO[a.strategy] || {};
+    const winRate = st.win_rate == null ? "—"
+      : (st.win_rate * 100).toFixed(0) + "%" + (st.round_trips < 10 ? " <span class=\"hint\">(n=" + st.round_trips + ")</span>" : "");
+    return `<tr>
+      <td><strong>${esc(a.name)}</strong><br><span class="hint">${esc(info.name || a.strategy)}</span></td>
+      <td class="mono">${fmtUSD(a.equity)}</td>
+      <td class="mono">${pctCell(a.total_return_pct)}</td>
+      <td class="mono">${usdCell(a.realized_pnl)}</td>
+      <td class="mono">${usdCell(a.unrealized_pnl)}</td>
+      <td class="mono">${winRate}</td>
+      <td class="mono">${st.round_trips ?? "—"}</td>
+      <td class="mono">${st.profit_factor == null ? "—" : st.profit_factor.toFixed(2)}</td>
+      <td class="mono">${m.max_drawdown_pct == null ? "—" : "-" + m.max_drawdown_pct.toFixed(2) + "%"}</td>
+      <td class="mono">${m.sharpe == null ? "—" : m.sharpe.toFixed(2)}</td>
+      <td class="mono">${st.fees_paid == null ? "—" : fmtUSD(st.fees_paid)}</td>
+      <td class="mono">${(a.positions || []).length}</td>
+    </tr>`;
+  }).join("");
+  el.innerHTML = `<table><thead><tr>
+      <th>Account</th><th>Equity</th><th>Return</th><th>Realized</th><th>Unrealized</th>
+      <th>Win rate</th><th>Round trips</th><th>Profit factor</th><th>Max DD (30d)</th><th>Sharpe (30d)</th><th>Fees</th><th>Open</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+
+  // Aggregate exposure: the accounts are independent books, so this line is
+  // the only view of the combined footprint (e.g. every sleeve long at once).
+  const t = state.portfolio_total || {};
+  const expEl = document.getElementById("exposure");
+  if (t.gross_long != null) {
+    const byAsset = Object.entries(t.exposure_by_asset || {})
+      .map(([k, v]) => `${esc(k)} ${fmtUSD(v)}`).join(" · ");
+    const eq = t.equity || 0;
+    const pctOf = (v) => eq > 0 ? ` (${(v / eq * 100).toFixed(0)}% of equity)` : "";
+    expEl.innerHTML =
+      `Combined exposure — long ${fmtUSD(t.gross_long)}${pctOf(t.gross_long)}, ` +
+      `short ${fmtUSD(t.gross_short)}${pctOf(t.gross_short)}, ` +
+      `net ${fmtUSD(t.net_exposure)}${byAsset ? ` · by asset: ${byAsset}` : ""}`;
+  } else {
+    expEl.innerHTML = "";
+  }
+}
+
 function renderState(state) {
   if (state && Array.isArray(state.accounts)) {
     renderAccountTabs(state);
+    renderCompare(state);
     const view = selectedAccount === "__total__"
       ? buildTotalView(state)
       : buildAccountView(state, selectedAccount);
@@ -574,6 +645,7 @@ function renderState(state) {
   } else {
     document.getElementById("accountTabs").innerHTML = "";
     document.getElementById("strategyNote").innerHTML = "";
+    renderCompare(null);
     renderAll(state);
   }
 }
@@ -792,6 +864,7 @@ const INFO = {
   sentiment: { title: "Sentiment", body: "Optional news-mood score. Negative news can veto a buy or trigger a risk-off sell.", eg: "<b>Negative (−0.6)</b> → skip an otherwise-valid buy." },
   chart: { title: "Main chart", body: "With “All” selected this is your equity (account value) over time — the dashed line marks where you started. Pick a coin to switch it to that coin's 1-hour price candles with the moving averages drawn on top." },
   risk_metrics: { title: "Risk-adjusted metrics", body: "Scales return against the risk taken to earn it, so a dollar P&L becomes interpretable — is a down stretch normal variance or a real regression? Computed from the equity curve over a 30-day lookback, annualized 24/7, risk-free 0." },
+  compare: { title: "Strategy comparison", body: "Every account side by side: equity, return, realized/unrealized P&L, win rate over completed round trips, profit factor (gross wins ÷ gross losses), 30-day max drawdown and Sharpe from each account's own equity curve, lifetime fees, and open position count. The exposure line below sums the combined long/short footprint across all accounts — they trade independently, so this is where you see them all lean the same way.", eg: "Win rate shows <b>(n=4)</b> while there are fewer than 10 round trips — too few to trust yet." },
   sharpe: { title: "Sharpe ratio", body: "Average daily return divided by its volatility, annualized. Higher is better; it rewards smooth gains and penalizes a bumpy ride.", eg: "<b>&gt; 1</b> is solid, <b>&lt; 0</b> means you lost money on average." },
   sortino: { title: "Sortino ratio", body: "Like Sharpe, but it only counts <em>downside</em> volatility — upside swings don't count against you. Blank until there's been a losing day.", eg: "A high Sortino with a lower Sharpe = gains are choppy but drawdowns are gentle." },
   max_drawdown: { title: "Max drawdown", body: "The deepest peak-to-trough drop in account value over the window — the worst it felt to hold through.", eg: "Equity fell from $11,000 to $9,900 → <b>-10%</b>." },

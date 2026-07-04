@@ -143,3 +143,48 @@ def test_export_combined_state_writes_unified_shape():
     assert state["portfolio_total"]["starting_cash"] == 15000.0
     assert state["prices"] == {"BTC-USD": 100.0}
     s.close()
+
+
+def test_account_state_stats_block():
+    with tempfile.TemporaryDirectory() as d:
+        s = Storage(os.path.join(d, "t.db"))
+        p = Portfolio(10_000, 0.0)
+        # Long round trip: +10 win. Short round trip: -5 loss (realized on the
+        # covering BUY — stats must be direction-agnostic).
+        p.execute("BUY", "BTC-USD", 100.0, 1.0, timestamp=1)
+        p.execute("SELL", "BTC-USD", 110.0, 1.0, timestamp=2)
+        p.execute("SELL", "ETH-USD", 100.0, 1.0, timestamp=3)
+        p.execute("BUY", "ETH-USD", 105.0, 1.0, timestamp=4)
+        block = s.account_state(p, {"BTC-USD": 110.0, "ETH-USD": 105.0}, {})
+        st = block["stats"]
+        assert st["fills"] == 4
+        assert st["round_trips"] == 2
+        assert st["wins"] == 1 and st["losses"] == 1
+        assert st["win_rate"] == 0.5
+        assert st["profit_factor"] == 2.0   # 10 gross win / 5 gross loss
+        assert st["avg_win"] == 10.0 and st["avg_loss"] == -5.0
+        assert st["fees_paid"] == 0.0
+        s.close()
+
+
+def test_export_combined_state_aggregates_exposure():
+    with tempfile.TemporaryDirectory() as d:
+        s = Storage(os.path.join(d, "t.db"))
+        long_p = Portfolio(10_000, 0.0)
+        long_p.execute("BUY", "BTC-USD", 100.0, 10.0, timestamp=1)   # +$1200 @ 120
+        short_p = Portfolio(10_000, 0.0)
+        short_p.execute("SELL", "ETH-USD", 50.0, 4.0, timestamp=1)   # -$180 @ 45
+        prices = {"BTC-USD": 120.0, "ETH-USD": 45.0}
+        blocks = [
+            s.account_state(long_p, prices, {}, name="a", products=["BTC-USD"]),
+            s.account_state(short_p, prices, {}, name="b", products=["ETH-USD"]),
+        ]
+        path = os.path.join(d, "state.json")
+        export_combined_state(path, blocks, prices)
+        state = json.load(open(path))
+        t = state["portfolio_total"]
+        assert t["gross_long"] == 1200.0
+        assert t["gross_short"] == 180.0
+        assert t["net_exposure"] == 1020.0
+        assert t["exposure_by_asset"] == {"BTC-USD": 1200.0, "ETH-USD": -180.0}
+        s.close()

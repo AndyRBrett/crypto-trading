@@ -24,6 +24,8 @@ from .strategy import (
     Strategy,
     StrategyConfig,
     apply_sentiment,
+    insufficient_data,
+    ohlc,
 )
 
 # -- registry ---------------------------------------------------------------
@@ -61,14 +63,6 @@ def available() -> list[str]:
 register("ema_crossover")(Strategy)
 
 
-def _ohlc(candles: Sequence[dict]):
-    """Pull close/high/low lists, defaulting high/low to close (close-only data)."""
-    closes = [float(c["close"]) for c in candles]
-    highs = [float(c.get("high", c["close"])) for c in candles]
-    lows = [float(c.get("low", c["close"])) for c in candles]
-    return closes, highs, lows
-
-
 # -- RSI mean reversion -----------------------------------------------------
 
 
@@ -91,16 +85,11 @@ class RsiMeanReversionStrategy:
         self, product_id: str, candles: Sequence[dict], sentiment=None
     ) -> Signal:
         c = self.config
-        closes, highs, lows = _ohlc(candles)
+        closes, highs, lows = ohlc(candles)
         price = closes[-1] if closes else 0.0
 
         if len(closes) < self.min_candles():
-            return Signal(
-                product_id=product_id,
-                action=HOLD,
-                price=price,
-                reasons=[f"Not enough data yet ({len(closes)}/{self.min_candles()} candles)."],
-            )
+            return insufficient_data(product_id, price, len(closes), self.min_candles())
 
         rsi_val = indicators.rsi(closes, c.rsi_period)
         atr_val = indicators.atr(highs, lows, closes, c.atr_period)
@@ -183,9 +172,7 @@ class TrendLongShortStrategy:
         self.config = config or StrategyConfig()
 
     def _ma(self, values, period):
-        if self.config.ma_type == "sma":
-            return indicators.sma(values, period)
-        return indicators.ema(values, period)
+        return indicators.moving_average(values, period, self.config.ma_type)
 
     def min_candles(self) -> int:
         # Same history requirement as the long-only crossover it mirrors.
@@ -195,16 +182,11 @@ class TrendLongShortStrategy:
         self, product_id: str, candles: Sequence[dict], sentiment=None
     ) -> Signal:
         c = self.config
-        closes, highs, lows = _ohlc(candles)
+        closes, highs, lows = ohlc(candles)
         price = closes[-1] if closes else 0.0
 
         if len(closes) < self.min_candles():
-            return Signal(
-                product_id=product_id,
-                action=HOLD,
-                price=price,
-                reasons=[f"Not enough data yet ({len(closes)}/{self.min_candles()} candles)."],
-            )
+            return insufficient_data(product_id, price, len(closes), self.min_candles())
 
         fast = self._ma(closes, c.fast_period)
         slow = self._ma(closes, c.slow_period)
@@ -328,9 +310,7 @@ class RegimeStrategy:
         self.config = config or StrategyConfig()
 
     def _ma(self, values, period):
-        if self.config.ma_type == "sma":
-            return indicators.sma(values, period)
-        return indicators.ema(values, period)
+        return indicators.moving_average(values, period, self.config.ma_type)
 
     def min_candles(self) -> int:
         c = self.config
@@ -340,16 +320,11 @@ class RegimeStrategy:
         self, product_id: str, candles: Sequence[dict], sentiment=None
     ) -> Signal:
         c = self.config
-        closes, highs, lows = _ohlc(candles)
+        closes, highs, lows = ohlc(candles)
         price = closes[-1] if closes else 0.0
 
         if len(closes) < self.min_candles():
-            return Signal(
-                product_id=product_id,
-                action=HOLD,
-                price=price,
-                reasons=[f"Not enough data yet ({len(closes)}/{self.min_candles()} candles)."],
-            )
+            return insufficient_data(product_id, price, len(closes), self.min_candles())
 
         trend_ma = self._ma(closes, c.trend_period)
         atr_val = indicators.atr(highs, lows, closes, c.atr_period)
@@ -417,16 +392,11 @@ class DonchianBreakoutStrategy:
         self, product_id: str, candles: Sequence[dict], sentiment=None
     ) -> Signal:
         c = self.config
-        closes, highs, lows = _ohlc(candles)
+        closes, highs, lows = ohlc(candles)
         price = closes[-1] if closes else 0.0
 
         if len(closes) < self.min_candles():
-            return Signal(
-                product_id=product_id,
-                action=HOLD,
-                price=price,
-                reasons=[f"Not enough data yet ({len(closes)}/{self.min_candles()} candles)."],
-            )
+            return insufficient_data(product_id, price, len(closes), self.min_candles())
 
         # Channels over the PRIOR bars (exclude the current bar, which is breaking).
         upper = max(highs[-c.donchian_period - 1 : -1])

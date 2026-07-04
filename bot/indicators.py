@@ -34,6 +34,19 @@ def ema(values: Sequence[float], period: int) -> float | None:
     return current
 
 
+def moving_average(
+    values: Sequence[float], period: int, ma_type: str = "ema"
+) -> float | None:
+    """SMA or EMA of the last ``period`` values, selected by ``ma_type``.
+
+    The strategies all offer the same sma/ema switch; this is the single
+    dispatch point so they don't each carry their own copy.
+    """
+    if ma_type == "sma":
+        return sma(values, period)
+    return ema(values, period)
+
+
 def rsi(values: Sequence[float], period: int = 14) -> float | None:
     """Wilder's Relative Strength Index over the last ``period`` deltas.
 
