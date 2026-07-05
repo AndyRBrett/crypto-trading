@@ -122,6 +122,10 @@ class Engine:
         prices: dict[str, float] = {}
         price_history: dict[str, list] = {}
 
+        # Fetch every product's candles up front. Per-product strategies see no
+        # difference; cross-sectional strategies (momentum_rotation) get the
+        # whole universe via the optional prepare() hook before signals run.
+        candles_by_product: dict[str, list] = {}
         for product_id in self.config.products:
             try:
                 candles = self.market_data.get_candles(product_id)
@@ -131,7 +135,17 @@ class Engine:
             if not candles:
                 log.warning("No candles for %s", product_id)
                 continue
+            candles_by_product[product_id] = candles
 
+        if hasattr(self.strategy, "prepare"):
+            self.strategy.prepare(
+                {
+                    pid: closed_candles(c, self.config.candle_granularity)
+                    for pid, c in candles_by_product.items()
+                }
+            )
+
+        for product_id, candles in candles_by_product.items():
             # Recent OHLC for the dashboard's per-coin candlestick chart.
             price_history[product_id] = [
                 {

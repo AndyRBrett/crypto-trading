@@ -131,6 +131,9 @@ class StrategyConfig:
     # RSI mean-reversion (used by the "rsi_mean_reversion" strategy).
     rsi_mr_oversold: float = 30.0  # BUY when RSI <= this (oversold bounce)
     rsi_mr_overbought: float = 55.0  # SELL when RSI >= this (reverted to mean)
+    # Cross-sectional momentum rotation (used by "momentum_rotation"): the
+    # trailing-return window products are ranked by.
+    rotation_lookback_bars: int = 90
 
 
 class Strategy:

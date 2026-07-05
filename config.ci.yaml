@@ -83,6 +83,25 @@ accounts:
     trailing_stop: false
     fallback_stop_pct: 0.5
 
+  # Cross-sectional momentum rotation: rank the universe by trailing 90-bar
+  # return, hold ONLY the leader and only while it trades above its own
+  # 200-bar trend MA — otherwise cash. A relative-strength mechanism, unlike
+  # the per-asset time-series rules above. NOT enabled by default; uncomment
+  # to run it as a sixth paper account. NOTE: multi-year backtest validation
+  # is still outstanding (the backtester is single-instrument).
+  # - name: rotation
+  #   strategy_type: momentum_rotation
+  #   products: [BTC-USD, ETH-USD, SOL-USD]
+  #   starting_cash: 10000
+  #   risk_per_trade_pct: 0.95   # size to the cap like the regime account
+  #   max_position_pct: 0.95
+  #   stop_loss_atr_mult: 10     # wide disaster stop; rotation is the exit
+  #   take_profit_atr_mult: 1000
+  #   trailing_stop: false
+  #   fallback_stop_pct: 0.5
+  #   strategy:
+  #     rotation_lookback_bars: 90
+
 # Risk management: volatility-based sizing and protective exits.
 risk_per_trade_pct: 0.01
 max_position_pct: 0.30
