@@ -380,11 +380,14 @@ class MomentumRotationStrategy:
     all *time-series* rules evaluated per asset in isolation: this one is
     *cross-sectional* — every tick it ranks the whole configured universe by
     trailing ``rotation_lookback_bars`` return and wants to hold only the
-    leader, and only while that leader trades above its own long-term trend MA
-    (``trend_period``, default 200). Everything else (and the leader, in a bear
-    regime) gets a SELL, which the engine treats as "exit if held" — so the
-    account rotates into strength and sits in cash when even the leader is
-    below trend.
+    leader, and only while that leader BOTH trades above its own long-term
+    trend MA (``trend_period``, default 200) AND has a positive trailing
+    return. Everything else (and the leader, when either gate fails) gets a
+    SELL, which the engine treats as "exit if held" — so the account rotates
+    into strength and sits in cash when even the strongest asset is merely
+    the least-bad loser. (Real-data check that motivated the momentum gate:
+    on 2026-07-04 SOL "led" BTC/ETH at −0.1% vs −8.5%/−15.4% — leadership
+    alone is not strength.)
 
     Cross-sectional ranking needs the full universe, which the per-product
     ``generate_signal`` contract can't supply — the engine's ``prepare`` hook
@@ -469,7 +472,7 @@ class MomentumRotationStrategy:
             f"{pid} {mom * 100:+.1f}%" for pid, mom in self._momentum.items()
         )
 
-        if product_id == leader and price > trend_ma:
+        if product_id == leader and price > trend_ma and leader_mom > 0:
             action = BUY
             reasons.append(
                 f"{product_id} leads {c.rotation_lookback_bars}-bar momentum "
@@ -483,12 +486,21 @@ class MomentumRotationStrategy:
             edge = leader_mom - max(others) if others else leader_mom
             strength = min(1.0, 0.5 + edge * 5)
         elif product_id == leader:
+            # Leading the pack is not enough: both absolute gates must hold.
             action = SELL
-            reasons.append(
-                f"{product_id} leads momentum ({rank_txt}) but price "
-                f"${price:,.2f} is below its trend MA({c.trend_period}) "
-                f"${trend_ma:,.2f} — even the leader is in a bear regime, cash."
-            )
+            if price <= trend_ma:
+                reasons.append(
+                    f"{product_id} leads momentum ({rank_txt}) but price "
+                    f"${price:,.2f} is below its trend MA({c.trend_period}) "
+                    f"${trend_ma:,.2f} — even the leader is in a bear regime, cash."
+                )
+            if leader_mom <= 0:
+                reasons.append(
+                    f"{product_id} leads momentum ({rank_txt}) but its "
+                    f"{c.rotation_lookback_bars}-bar return is non-positive "
+                    f"({leader_mom * 100:+.1f}%) — the least-bad loser is still "
+                    f"a loser, cash."
+                )
             strength = 0.5
         else:
             action = SELL

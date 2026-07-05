@@ -90,6 +90,44 @@ class RotationHandSequence(unittest.TestCase):
         sig_b = strat.generate_signal("B-USD", uni["B-USD"])
         self.assertEqual(sig_b.action, SELL)
 
+    def test_leader_with_negative_momentum_means_cash_even_above_trend_ma(self):
+        # The gate added after the real-data check (2026-07-04: SOL "led" at
+        # −0.1% vs BTC −8.5% / ETH −15.4%): a leader that is merely the
+        # least-bad loser must NOT be bought, even when it trades above its
+        # own trend MA. Both gates — trend AND positive momentum — must hold.
+        uni = {
+            # A: crash long ago, flat-ish since. Last-4 momentum 96/100-1 = -4%
+            #    but SMA8 = (3*50 + 100+99+98+97+96)/8 = 80 < 96 -> ABOVE its MA.
+            "A-USD": candles([50, 50, 50, 50, 100, 99, 98, 97, 96]),
+            # B: same shape, much worse: -40%.
+            "B-USD": candles([50, 50, 50, 50, 100, 90, 80, 70, 60]),
+        }
+        strat = _strategy(uni)
+        self.assertAlmostEqual(strat._momentum["A-USD"], -0.04)
+        self.assertAlmostEqual(strat._momentum["B-USD"], -0.40)
+
+        sig_a = strat.generate_signal("A-USD", uni["A-USD"])
+        # Above trend MA (96 > 80), leads the ranking — and still cash.
+        self.assertGreater(96, sig_a.indicators["trend_ma"])
+        self.assertEqual(sig_a.indicators["leader"], "A-USD")
+        self.assertEqual(sig_a.action, SELL)
+        self.assertIn("non-positive", sig_a.reasons[0])
+
+        sig_b = strat.generate_signal("B-USD", uni["B-USD"])
+        self.assertEqual(sig_b.action, SELL)
+
+    def test_leader_momentum_exactly_zero_is_cash(self):
+        # Strict > 0: a flat leader (0.0%) is not strength.
+        uni = {
+            "A-USD": candles([50, 50, 50, 50, 100, 99, 98, 99, 100]),  # 100/100-1 = 0
+            "B-USD": candles([50, 50, 50, 50, 100, 90, 80, 70, 60]),
+        }
+        strat = _strategy(uni)
+        self.assertAlmostEqual(strat._momentum["A-USD"], 0.0)
+        sig = strat.generate_signal("A-USD", uni["A-USD"])
+        self.assertEqual(sig.action, SELL)
+        self.assertIn("non-positive", sig.reasons[0])
+
     def test_exact_momentum_tie_breaks_to_first_configured_product(self):
         seq = [100, 100, 100, 100, 100, 105, 110, 115, 120]
         uni = {"A-USD": candles(seq), "B-USD": candles(list(seq))}

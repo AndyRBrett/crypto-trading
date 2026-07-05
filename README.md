@@ -327,11 +327,13 @@ behavior. `strategy_type` selects the algorithm from the registry in
   give up. Long/cash only.
 - `momentum_rotation` — cross-sectional relative strength: rank the account's
   products by trailing `rotation_lookback_bars` return, hold ONLY the leader,
-  and only while the leader is above its own trend MA — otherwise cash. The
-  one strategy that compares assets *against each other* instead of against
-  their own history. Long/cash only; price-only (no sentiment). ⚠ Multi-year
-  backtest validation is still outstanding (the backtester is
-  single-instrument; see `scripts/backtest.py`, which skips it).
+  and only while the leader is above its own trend MA **and its trailing
+  return is positive** — otherwise cash (the least-bad loser is still a
+  loser). The one strategy that compares assets *against each other* instead
+  of against their own history. Long/cash only; price-only (no sentiment).
+  ⚠ Multi-year backtest validation is still outstanding (the backtester is
+  single-instrument; see `scripts/backtest.py`, which skips it). See
+  [ENABLING.md](ENABLING.md) before turning it on.
 
 ```yaml
 accounts:

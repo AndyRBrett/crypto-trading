@@ -532,7 +532,7 @@ const STRATEGY_INFO = {
   donchian_breakout: { name: "Donchian breakout", desc: "a breakout rider — buys when price pushes above its recent high (the prior N-bar channel) and exits when it falls below its recent low." },
   trend_long_short: { name: "Trend long/short", desc: "a symmetric trend-follower — longs confirmed uptrends like the EMA crossover, and can also short confirmed downtrends, so it's the only sleeve that can profit while the market falls." },
   regime: { name: "Regime filter", desc: "a stay-invested holder — keeps a full long position while price is above the 200-day trend average and moves entirely to cash when it breaks below, riding bull markets and sidestepping deep bears." },
-  momentum_rotation: { name: "Momentum rotation", desc: "a relative-strength rotator — ranks all its coins by trailing return, holds only the current leader while that leader is above its own 200-day trend average, and sits in cash when even the leader is in a downtrend." },
+  momentum_rotation: { name: "Momentum rotation", desc: "a relative-strength rotator — ranks all its coins by trailing return and holds only the current leader, but only while that leader is above its own 200-day trend average AND actually up over the window; when even the leader is flat or falling it sits in cash." },
 };
 
 function renderStrategyNote(state) {
