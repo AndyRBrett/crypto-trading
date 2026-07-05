@@ -47,6 +47,25 @@ class Signal:
     thresholds: dict = field(default_factory=dict)
 
 
+def ohlc(candles: Sequence[dict]) -> tuple[list[float], list[float], list[float]]:
+    """Pull close/high/low lists from candles, defaulting high/low to close so
+    close-only data (e.g. tests) still works. Shared by every strategy."""
+    closes = [float(c["close"]) for c in candles]
+    highs = [float(c.get("high", c["close"])) for c in candles]
+    lows = [float(c.get("low", c["close"])) for c in candles]
+    return closes, highs, lows
+
+
+def insufficient_data(product_id: str, price: float, have: int, need: int) -> Signal:
+    """The standard HOLD emitted while a strategy is still short of history."""
+    return Signal(
+        product_id=product_id,
+        action=HOLD,
+        price=price,
+        reasons=[f"Not enough data yet ({have}/{need} candles)."],
+    )
+
+
 def apply_sentiment(action, strength, snapshot, sentiment, config, reasons):
     """Fold news sentiment into a price-based decision.
 
@@ -112,6 +131,9 @@ class StrategyConfig:
     # RSI mean-reversion (used by the "rsi_mean_reversion" strategy).
     rsi_mr_oversold: float = 30.0  # BUY when RSI <= this (oversold bounce)
     rsi_mr_overbought: float = 55.0  # SELL when RSI >= this (reverted to mean)
+    # Cross-sectional momentum rotation (used by "momentum_rotation"): the
+    # trailing-return window products are ranked by.
+    rotation_lookback_bars: int = 90
 
 
 class Strategy:
@@ -119,9 +141,7 @@ class Strategy:
         self.config = config or StrategyConfig()
 
     def _ma(self, values, period):
-        if self.config.ma_type == "sma":
-            return indicators.sma(values, period)
-        return indicators.ema(values, period)
+        return indicators.moving_average(values, period, self.config.ma_type)
 
     def min_candles(self) -> int:
         """Minimum candles needed to produce a meaningful signal."""
@@ -138,19 +158,11 @@ class Strategy:
         self, product_id: str, candles: Sequence[dict], sentiment=None
     ) -> Signal:
         c = self.config
-        closes = [float(candle["close"]) for candle in candles]
-        # High/low default to close so close-only candles (e.g. tests) still work.
-        highs = [float(candle.get("high", candle["close"])) for candle in candles]
-        lows = [float(candle.get("low", candle["close"])) for candle in candles]
+        closes, highs, lows = ohlc(candles)
         price = closes[-1] if closes else 0.0
 
         if len(closes) < self.min_candles():
-            return Signal(
-                product_id=product_id,
-                action=HOLD,
-                price=price,
-                reasons=[f"Not enough data yet ({len(closes)}/{self.min_candles()} candles)."],
-            )
+            return insufficient_data(product_id, price, len(closes), self.min_candles())
 
         fast = self._ma(closes, c.fast_period)
         slow = self._ma(closes, c.slow_period)

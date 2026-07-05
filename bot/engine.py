@@ -17,7 +17,7 @@ import time
 from .config import Config
 from .coordinate import Coordinator
 from .explain import Explainer
-from .market_data import MarketData, closed_candles
+from .market_data import _GRANULARITY_SECONDS, MarketData, closed_candles
 from .notifier import Notifier
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
 from .publish import Publisher
@@ -40,8 +40,13 @@ IN_POSITION = "in_position"        # holding; no protective exit or SELL fired
 MAX_OPEN_POSITIONS = "max_open_positions"  # BUY blocked: at max concurrent positions
 SIZE_ZERO = "size_zero"            # BUY sized to ~0 by risk limits / dust floor
 INSUFFICIENT_BALANCE = "insufficient_balance"  # BUY rejected: not enough cash
+REENTRY_COOLDOWN = "reentry_cooldown"  # entry blocked: too soon after a stop-out
+PORTFOLIO_EXPOSURE = "portfolio_exposure"  # entry vetoed: combined gross over cap
 # reject_codes that mean "we wanted to BUY but couldn't" vs. "no actionable signal".
-_REJECTED_CODES = frozenset({MAX_OPEN_POSITIONS, SIZE_ZERO, INSUFFICIENT_BALANCE})
+_REJECTED_CODES = frozenset(
+    {MAX_OPEN_POSITIONS, SIZE_ZERO, INSUFFICIENT_BALANCE, REENTRY_COOLDOWN,
+     PORTFOLIO_EXPOSURE}
+)
 
 
 class Engine:
@@ -54,9 +59,15 @@ class Engine:
         sentiment_analyzer: SentimentAnalyzer | None = None,
         publisher: Publisher | None = None,
         coordinator: Coordinator | None = None,
+        portfolio_guard=None,
     ):
         self.config = config
         self.market_data = market_data or MarketData(config)
+        # Cross-account exposure guard (see bot/portfolio_guard.py). Only the
+        # multi-account Runner wires one in; None means no guard, and a
+        # disabled guard approves everything — either way entries behave as
+        # before until portfolio_guard_enabled is set.
+        self.portfolio_guard = portfolio_guard
         self.coordinator = coordinator or Coordinator(config)
         # Pull the shared portfolio before opening the local DB (only when we
         # create the storage ourselves; injected storage in tests is left alone).
@@ -111,6 +122,10 @@ class Engine:
         prices: dict[str, float] = {}
         price_history: dict[str, list] = {}
 
+        # Fetch every product's candles up front. Per-product strategies see no
+        # difference; cross-sectional strategies (momentum_rotation) get the
+        # whole universe via the optional prepare() hook before signals run.
+        candles_by_product: dict[str, list] = {}
         for product_id in self.config.products:
             try:
                 candles = self.market_data.get_candles(product_id)
@@ -120,7 +135,17 @@ class Engine:
             if not candles:
                 log.warning("No candles for %s", product_id)
                 continue
+            candles_by_product[product_id] = candles
 
+        if hasattr(self.strategy, "prepare"):
+            self.strategy.prepare(
+                {
+                    pid: closed_candles(c, self.config.candle_granularity)
+                    for pid, c in candles_by_product.items()
+                }
+            )
+
+        for product_id, candles in candles_by_product.items():
             # Recent OHLC for the dashboard's per-coin candlestick chart.
             price_history[product_id] = [
                 {
@@ -222,13 +247,29 @@ class Engine:
 
         # Snapshot equity using fresh prices, then export dashboard state.
         if prices:
-            current_equity = self.portfolio.total_equity(prices)
-            self.storage.save_equity(
-                self.portfolio.cash,
-                self.portfolio.market_value(prices),
-                current_equity,
-            )
-            self._maybe_notify_new_high(current_equity)
+            # A failed candle fetch leaves that product out of `prices`, and
+            # market_value() silently values missing products at zero — an
+            # equity snapshot taken then would record a false dip (corrupting
+            # drawdown/Sharpe). Skip the snapshot unless every open position
+            # was priced this tick; the state export below still runs.
+            unpriced = [
+                pid
+                for pid, p in self.portfolio.positions.items()
+                if p.quantity != 0 and pid not in prices
+            ]
+            if unpriced:
+                log.warning(
+                    "skipping equity snapshot: no fresh price for open position(s) %s",
+                    unpriced,
+                )
+            else:
+                current_equity = self.portfolio.total_equity(prices)
+                self.storage.save_equity(
+                    self.portfolio.cash,
+                    self.portfolio.market_value(prices),
+                    current_equity,
+                )
+                self._maybe_notify_new_high(current_equity)
             self.storage.export_state(
                 self.config.dashboard_state_path,
                 self.config,
@@ -279,6 +320,9 @@ class Engine:
             return None, IN_POSITION
 
         if signal.action == BUY:
+            if self._in_reentry_cooldown(product_id):
+                log.info("%s: in post-stop re-entry cooldown, skipping BUY", product_id)
+                return None, REENTRY_COOLDOWN
             if self._at_max_positions():
                 log.info("%s: at max open positions, skipping BUY", product_id)
                 return None, MAX_OPEN_POSITIONS
@@ -286,10 +330,16 @@ class Engine:
             if qty <= 0:
                 log.info("%s: position size ~0 after risk limits, skipping BUY", product_id)
                 return None, SIZE_ZERO
+            veto = self._guard_vetoes_entry(product_id, qty * price, prices)
+            if veto:
+                return None, PORTFOLIO_EXPOSURE
             trade = self._buy(product_id, price, qty, signal.reasons, signal.indicators)
             return trade, ACTED if trade else INSUFFICIENT_BALANCE
 
         if signal.action == SELL and getattr(self.config, "allow_short", False):
+            if self._in_reentry_cooldown(product_id):
+                log.info("%s: in post-stop re-entry cooldown, skipping SHORT", product_id)
+                return None, REENTRY_COOLDOWN
             if self._at_max_positions():
                 log.info("%s: at max open positions, skipping SHORT", product_id)
                 return None, MAX_OPEN_POSITIONS
@@ -297,10 +347,38 @@ class Engine:
             if qty <= 0:
                 log.info("%s: short size ~0 after risk limits, skipping", product_id)
                 return None, SIZE_ZERO
+            veto = self._guard_vetoes_entry(product_id, qty * price, prices)
+            if veto:
+                return None, PORTFOLIO_EXPOSURE
             trade = self._short(product_id, price, qty, signal.reasons, signal.indicators)
             return trade, ACTED if trade else INSUFFICIENT_BALANCE
 
         return None, NO_POSITION if signal.action == SELL else NO_SIGNAL
+
+    def _guard_vetoes_entry(self, product_id: str, notional: float, prices: dict) -> bool:
+        """Ask the cross-account guard about a NEW entry (never about exits).
+
+        No guard wired, or guard disabled -> never vetoes.
+        """
+        if self.portfolio_guard is None:
+            return False
+        ok, why = self.portfolio_guard.allows_entry(notional, prices)
+        if not ok:
+            log.info("%s: portfolio guard vetoed entry — %s", product_id, why)
+        return not ok
+
+    def _in_reentry_cooldown(self, product_id: str) -> bool:
+        """True while new entries in this product are blocked after a stop-out.
+
+        Bar length comes from the configured candle granularity; the stop-exit
+        timestamp comes from the replayed trade log (see
+        risk.reentry_cooldown_active), so this is restart-safe. Off by default
+        (``reentry_cooldown_bars: 0``) — existing behavior is unchanged.
+        """
+        span = _GRANULARITY_SECONDS.get(self.config.candle_granularity, 0)
+        return risk.reentry_cooldown_active(
+            self.config, self.portfolio.trades, product_id, time.time(), span
+        )
 
     def _at_max_positions(self) -> bool:
         """True once the portfolio holds the max concurrent positions (either

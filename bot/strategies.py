@@ -24,6 +24,8 @@ from .strategy import (
     Strategy,
     StrategyConfig,
     apply_sentiment,
+    insufficient_data,
+    ohlc,
 )
 
 # -- registry ---------------------------------------------------------------
@@ -61,14 +63,6 @@ def available() -> list[str]:
 register("ema_crossover")(Strategy)
 
 
-def _ohlc(candles: Sequence[dict]):
-    """Pull close/high/low lists, defaulting high/low to close (close-only data)."""
-    closes = [float(c["close"]) for c in candles]
-    highs = [float(c.get("high", c["close"])) for c in candles]
-    lows = [float(c.get("low", c["close"])) for c in candles]
-    return closes, highs, lows
-
-
 # -- RSI mean reversion -----------------------------------------------------
 
 
@@ -91,16 +85,11 @@ class RsiMeanReversionStrategy:
         self, product_id: str, candles: Sequence[dict], sentiment=None
     ) -> Signal:
         c = self.config
-        closes, highs, lows = _ohlc(candles)
+        closes, highs, lows = ohlc(candles)
         price = closes[-1] if closes else 0.0
 
         if len(closes) < self.min_candles():
-            return Signal(
-                product_id=product_id,
-                action=HOLD,
-                price=price,
-                reasons=[f"Not enough data yet ({len(closes)}/{self.min_candles()} candles)."],
-            )
+            return insufficient_data(product_id, price, len(closes), self.min_candles())
 
         rsi_val = indicators.rsi(closes, c.rsi_period)
         atr_val = indicators.atr(highs, lows, closes, c.atr_period)
@@ -183,9 +172,7 @@ class TrendLongShortStrategy:
         self.config = config or StrategyConfig()
 
     def _ma(self, values, period):
-        if self.config.ma_type == "sma":
-            return indicators.sma(values, period)
-        return indicators.ema(values, period)
+        return indicators.moving_average(values, period, self.config.ma_type)
 
     def min_candles(self) -> int:
         # Same history requirement as the long-only crossover it mirrors.
@@ -195,16 +182,11 @@ class TrendLongShortStrategy:
         self, product_id: str, candles: Sequence[dict], sentiment=None
     ) -> Signal:
         c = self.config
-        closes, highs, lows = _ohlc(candles)
+        closes, highs, lows = ohlc(candles)
         price = closes[-1] if closes else 0.0
 
         if len(closes) < self.min_candles():
-            return Signal(
-                product_id=product_id,
-                action=HOLD,
-                price=price,
-                reasons=[f"Not enough data yet ({len(closes)}/{self.min_candles()} candles)."],
-            )
+            return insufficient_data(product_id, price, len(closes), self.min_candles())
 
         fast = self._ma(closes, c.fast_period)
         slow = self._ma(closes, c.slow_period)
@@ -328,9 +310,7 @@ class RegimeStrategy:
         self.config = config or StrategyConfig()
 
     def _ma(self, values, period):
-        if self.config.ma_type == "sma":
-            return indicators.sma(values, period)
-        return indicators.ema(values, period)
+        return indicators.moving_average(values, period, self.config.ma_type)
 
     def min_candles(self) -> int:
         c = self.config
@@ -340,16 +320,11 @@ class RegimeStrategy:
         self, product_id: str, candles: Sequence[dict], sentiment=None
     ) -> Signal:
         c = self.config
-        closes, highs, lows = _ohlc(candles)
+        closes, highs, lows = ohlc(candles)
         price = closes[-1] if closes else 0.0
 
         if len(closes) < self.min_candles():
-            return Signal(
-                product_id=product_id,
-                action=HOLD,
-                price=price,
-                reasons=[f"Not enough data yet ({len(closes)}/{self.min_candles()} candles)."],
-            )
+            return insufficient_data(product_id, price, len(closes), self.min_candles())
 
         trend_ma = self._ma(closes, c.trend_period)
         atr_val = indicators.atr(highs, lows, closes, c.atr_period)
@@ -394,6 +369,166 @@ class RegimeStrategy:
         )
 
 
+# -- Cross-sectional momentum rotation ---------------------------------------
+
+
+@register("momentum_rotation")
+class MomentumRotationStrategy:
+    """Relative-strength rotation: hold only the strongest asset, gated by trend.
+
+    A genuinely different mechanism from the other five strategies, which are
+    all *time-series* rules evaluated per asset in isolation: this one is
+    *cross-sectional* — every tick it ranks the whole configured universe by
+    trailing ``rotation_lookback_bars`` return and wants to hold only the
+    leader, and only while that leader BOTH trades above its own long-term
+    trend MA (``trend_period``, default 200) AND has a positive trailing
+    return. Everything else (and the leader, when either gate fails) gets a
+    SELL, which the engine treats as "exit if held" — so the account rotates
+    into strength and sits in cash when even the strongest asset is merely
+    the least-bad loser. (Real-data check that motivated the momentum gate:
+    on 2026-07-04 SOL "led" BTC/ETH at −0.1% vs −8.5%/−15.4% — leadership
+    alone is not strength.)
+
+    Cross-sectional ranking needs the full universe, which the per-product
+    ``generate_signal`` contract can't supply — the engine's ``prepare`` hook
+    provides it once per tick. Called without ``prepare`` (e.g. the
+    single-product backtester), it emits HOLD rather than degenerate into a
+    one-horse race. Price-only by design: no sentiment gating.
+
+    Backtest validation is OUTSTANDING: the backtester is single-instrument by
+    design and the exchange isn't reachable from this environment, so this
+    strategy ships unit-tested against hand-constructed sequences only.
+    """
+
+    # scripts/backtest skips strategies that need the whole universe at once.
+    requires_universe = True
+
+    def __init__(self, config: StrategyConfig | None = None):
+        self.config = config or StrategyConfig()
+        # Trailing lookback return per product, refreshed by prepare() each
+        # tick. Ordinary dict: insertion order (= config product order) breaks
+        # exact momentum ties deterministically.
+        self._momentum: dict[str, float] = {}
+
+    def _ma(self, values, period):
+        return indicators.moving_average(values, period, self.config.ma_type)
+
+    def min_candles(self) -> int:
+        c = self.config
+        return max(c.rotation_lookback_bars + 1, c.trend_period, c.atr_period + 1)
+
+    def prepare(self, candles_by_product: dict) -> None:
+        """Rank inputs for this tick: trailing return per product (closed bars)."""
+        c = self.config
+        self._momentum = {}
+        for pid, candles in candles_by_product.items():
+            closes = [float(x["close"]) for x in candles]
+            if len(closes) >= c.rotation_lookback_bars + 1 and closes[-c.rotation_lookback_bars - 1] > 0:
+                self._momentum[pid] = closes[-1] / closes[-c.rotation_lookback_bars - 1] - 1.0
+
+    def generate_signal(
+        self, product_id: str, candles: Sequence[dict], sentiment=None
+    ) -> Signal:
+        c = self.config
+        closes, highs, lows = ohlc(candles)
+        price = closes[-1] if closes else 0.0
+
+        if len(closes) < self.min_candles():
+            return insufficient_data(product_id, price, len(closes), self.min_candles())
+
+        trend_ma = self._ma(closes, c.trend_period)
+        atr_val = indicators.atr(highs, lows, closes, c.atr_period)
+        own_mom = self._momentum.get(product_id)
+
+        snapshot = {
+            "trend_ma": round(trend_ma, 2),
+            "trend_period": c.trend_period,
+            "rotation_lookback_bars": c.rotation_lookback_bars,
+        }
+        if atr_val is not None:
+            snapshot["atr"] = round(atr_val, 2)
+        if own_mom is not None:
+            snapshot["momentum_pct"] = round(own_mom * 100, 2)
+
+        if not self._momentum:
+            return Signal(
+                product_id=product_id,
+                action=HOLD,
+                price=price,
+                indicators=snapshot,
+                reasons=[
+                    "Rotation needs the tick's full market snapshot (prepare() "
+                    "was not called) — holding."
+                ],
+            )
+
+        leader = max(self._momentum, key=self._momentum.get)
+        leader_mom = self._momentum[leader]
+        snapshot["leader"] = leader
+        snapshot["leader_momentum_pct"] = round(leader_mom * 100, 2)
+
+        reasons: list[str] = []
+        rank_txt = ", ".join(
+            f"{pid} {mom * 100:+.1f}%" for pid, mom in self._momentum.items()
+        )
+
+        if product_id == leader and price > trend_ma and leader_mom > 0:
+            action = BUY
+            reasons.append(
+                f"{product_id} leads {c.rotation_lookback_bars}-bar momentum "
+                f"({rank_txt}) — rotating into the strongest asset."
+            )
+            reasons.append(
+                f"Price ${price:,.2f} above trend MA({c.trend_period}) "
+                f"${trend_ma:,.2f} — leader confirmed by its own trend."
+            )
+            others = [m for pid, m in self._momentum.items() if pid != leader]
+            edge = leader_mom - max(others) if others else leader_mom
+            strength = min(1.0, 0.5 + edge * 5)
+        elif product_id == leader:
+            # Leading the pack is not enough: both absolute gates must hold.
+            action = SELL
+            if price <= trend_ma:
+                reasons.append(
+                    f"{product_id} leads momentum ({rank_txt}) but price "
+                    f"${price:,.2f} is below its trend MA({c.trend_period}) "
+                    f"${trend_ma:,.2f} — even the leader is in a bear regime, cash."
+                )
+            if leader_mom <= 0:
+                reasons.append(
+                    f"{product_id} leads momentum ({rank_txt}) but its "
+                    f"{c.rotation_lookback_bars}-bar return is non-positive "
+                    f"({leader_mom * 100:+.1f}%) — the least-bad loser is still "
+                    f"a loser, cash."
+                )
+            strength = 0.5
+        else:
+            action = SELL
+            reasons.append(
+                f"Not the momentum leader ({rank_txt} — leader: {leader}) — "
+                f"exiting/standing aside to hold only the strongest."
+            )
+            strength = 0.5
+
+        thresholds = {
+            # <= 0 once this product has caught up to the leader's momentum.
+            "momentum_to_leader_pct": round((leader_mom - (own_mom or 0.0)) * 100, 3),
+            "price_to_trend_pct": round((price - trend_ma) / trend_ma * 100, 3)
+            if trend_ma
+            else 0.0,
+        }
+        # Price-only by design (like the regime filter): no sentiment gating.
+        return Signal(
+            product_id=product_id,
+            action=action,
+            price=price,
+            indicators=snapshot,
+            reasons=reasons,
+            strength=round(strength, 2),
+            thresholds=thresholds,
+        )
+
+
 # -- Donchian breakout ------------------------------------------------------
 
 
@@ -417,16 +552,11 @@ class DonchianBreakoutStrategy:
         self, product_id: str, candles: Sequence[dict], sentiment=None
     ) -> Signal:
         c = self.config
-        closes, highs, lows = _ohlc(candles)
+        closes, highs, lows = ohlc(candles)
         price = closes[-1] if closes else 0.0
 
         if len(closes) < self.min_candles():
-            return Signal(
-                product_id=product_id,
-                action=HOLD,
-                price=price,
-                reasons=[f"Not enough data yet ({len(closes)}/{self.min_candles()} candles)."],
-            )
+            return insufficient_data(product_id, price, len(closes), self.min_candles())
 
         # Channels over the PRIOR bars (exclude the current bar, which is breaking).
         upper = max(highs[-c.donchian_period - 1 : -1])

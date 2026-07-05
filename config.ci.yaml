@@ -83,6 +83,27 @@ accounts:
     trailing_stop: false
     fallback_stop_pct: 0.5
 
+  # Cross-sectional momentum rotation: rank the universe by trailing 90-bar
+  # return, hold ONLY the leader and only while it trades above its own
+  # 200-bar trend MA AND its 90-bar return is positive — otherwise cash (a
+  # leader that is merely the least-bad loser is not bought). A relative-
+  # strength mechanism, unlike the per-asset time-series rules above. NOT
+  # enabled by default; uncomment to run it as a sixth paper account. NOTE:
+  # multi-year backtest validation is still outstanding (the backtester is
+  # single-instrument). See ENABLING.md before turning this on.
+  # - name: rotation
+  #   strategy_type: momentum_rotation
+  #   products: [BTC-USD, ETH-USD, SOL-USD]
+  #   starting_cash: 10000
+  #   risk_per_trade_pct: 0.95   # size to the cap like the regime account
+  #   max_position_pct: 0.95
+  #   stop_loss_atr_mult: 10     # wide disaster stop; rotation is the exit
+  #   take_profit_atr_mult: 1000
+  #   trailing_stop: false
+  #   fallback_stop_pct: 0.5
+  #   strategy:
+  #     rotation_lookback_bars: 90
+
 # Risk management: volatility-based sizing and protective exits.
 risk_per_trade_pct: 0.01
 max_position_pct: 0.30
@@ -91,6 +112,18 @@ stop_loss_atr_mult: 2.0
 take_profit_atr_mult: 6.0   # 3:1 reward:risk; daily sweep favors wider targets
 trailing_stop: true
 fallback_stop_pct: 0.08
+# Post-stop-out re-entry cooldown (bars). OFF (0) = current behavior; set to
+# e.g. 1 to make a product sit out one daily bar after a protective stop
+# before a new entry is allowed (stops the stop-out -> instant-re-entry
+# whipsaw seen on long_short 2026-07-02).
+reentry_cooldown_bars: 0
+
+# Cross-account exposure guard: OFF = read-only (combined gross/net exposure
+# is still computed and logged each tick). Enable to veto new entries that
+# would push combined gross exposure over max_gross_exposure_pct x combined
+# equity across all five accounts. Never blocks exits.
+portfolio_guard_enabled: false
+max_gross_exposure_pct: 1.5
 
 # News sentiment (needs the ANTHROPIC_API_KEY Actions secret; safe no-op without).
 sentiment_enabled: true

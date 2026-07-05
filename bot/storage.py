@@ -13,7 +13,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .portfolio import Portfolio, Trade
+from .portfolio import Portfolio, Trade, closing_legs
 
 
 def export_combined_state(
@@ -42,6 +42,23 @@ def export_combined_state(
         if total["starting_cash"]
         else 0.0
     )
+    # Aggregate exposure across all accounts: the per-account books are fully
+    # independent, so this is the only place the combined footprint is visible
+    # (e.g. every sleeve long the same correlated coins at once).
+    gross_long = gross_short = 0.0
+    by_asset: dict[str, float] = {}
+    for b in account_blocks:
+        for p in b.get("positions", []):
+            v = p.get("value", 0.0)
+            if v >= 0:
+                gross_long += v
+            else:
+                gross_short += -v
+            by_asset[p["product_id"]] = by_asset.get(p["product_id"], 0.0) + v
+    total["gross_long"] = gross_long
+    total["gross_short"] = gross_short
+    total["net_exposure"] = gross_long - gross_short
+    total["exposure_by_asset"] = {k: round(v, 2) for k, v in sorted(by_asset.items())}
     # Union of products across accounts, order-preserving.
     products: list[str] = []
     for b in account_blocks:
@@ -299,8 +316,31 @@ class Storage:
                 }
             )
 
-        recent = self.load_trades()[-50:][::-1]
+        # The replayed portfolio's trades, not a fresh load_trades(): the replay
+        # normalizes realized_pnl to the current formula (see
+        # Portfolio.from_trades), so the trade list matches the P&L totals.
+        recent = portfolio.trades[-50:][::-1]
         equity = portfolio.total_equity(prices)
+
+        # Lifetime trade statistics for the strategy-comparison table. A round
+        # trip is a closing leg (SELL closing a long / BUY covering a short);
+        # win rate and profit factor are only meaningful over those.
+        exits = closing_legs(portfolio.trades)
+        exit_wins = [t.realized_pnl for t in exits if t.realized_pnl > 0]
+        exit_losses = [t.realized_pnl for t in exits if t.realized_pnl < 0]
+        gross_win = sum(exit_wins)
+        gross_loss = -sum(exit_losses)
+        stats = {
+            "fills": len(portfolio.trades),
+            "round_trips": len(exits),
+            "wins": len(exit_wins),
+            "losses": len(exit_losses),
+            "win_rate": round(len(exit_wins) / len(exits), 3) if exits else None,
+            "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else None,
+            "avg_win": round(gross_win / len(exit_wins), 2) if exit_wins else None,
+            "avg_loss": round(-gross_loss / len(exit_losses), 2) if exit_losses else None,
+            "fees_paid": round(sum(t.fee for t in portfolio.trades), 2),
+        }
         return {
             "name": name,
             "strategy": strategy,
@@ -316,6 +356,7 @@ class Storage:
             ),
             "realized_pnl": portfolio.realized_pnl(),
             "unrealized_pnl": portfolio.unrealized_pnl(prices),
+            "stats": stats,
             "positions": positions,
             "latest_signals": latest_signals,
             "activity": self.load_activity(),

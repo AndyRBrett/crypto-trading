@@ -113,6 +113,27 @@ accounts:
     trailing_stop: false
     fallback_stop_pct: 0.5
 
+  # Cross-sectional momentum rotation: rank the universe by trailing 90-bar
+  # return, hold ONLY the leader and only while it trades above its own
+  # 200-bar trend MA AND its 90-bar return is positive — otherwise cash (a
+  # leader that is merely the least-bad loser is not bought). A relative-
+  # strength mechanism, unlike the per-asset time-series rules above. NOT
+  # enabled by default; uncomment to run it as a sixth paper account. NOTE:
+  # multi-year backtest validation is still outstanding (the backtester is
+  # single-instrument). See ENABLING.md before turning this on.
+  # - name: rotation
+  #   strategy_type: momentum_rotation
+  #   products: [BTC-USD, ETH-USD, SOL-USD]
+  #   starting_cash: 10000
+  #   risk_per_trade_pct: 0.95   # size to the cap like the regime account
+  #   max_position_pct: 0.95
+  #   stop_loss_atr_mult: 10     # wide disaster stop; rotation is the exit
+  #   take_profit_atr_mult: 1000
+  #   trailing_stop: false
+  #   fallback_stop_pct: 0.5
+  #   strategy:
+  #     rotation_lookback_bars: 90
+
 # Risk management: volatility-based sizing and protective exits.
 risk_per_trade_pct: 0.01     # risk ~1% of equity per trade (sized off the stop)
 max_position_pct: 0.30       # cap any single position at 30% of equity
@@ -121,6 +142,19 @@ stop_loss_atr_mult: 2.0      # initial stop = entry - 2 * ATR
 take_profit_atr_mult: 6.0    # target = entry + 6 * ATR (3:1 reward:risk; daily sweep favors this)
 trailing_stop: true          # ride winners with a Chandelier trailing stop
 fallback_stop_pct: 0.08      # stop distance when ATR isn't available
+# Bars to block NEW entries in a product after a protective stop closed a
+# position there. Level-triggered re-entry otherwise re-arms on the very next
+# tick — observed live as a stop-out re-shorted 2h later at a worse price.
+# 0 disables (default): behavior is exactly as before. Overridable per account.
+reentry_cooldown_bars: 0
+
+# Cross-account portfolio guard. The combined gross exposure of ALL accounts
+# is computed and logged every tick regardless; enabling the guard makes it
+# also VETO any new entry that would push combined gross exposure above
+# max_gross_exposure_pct x combined equity. Exits/stops are never blocked.
+# Disabled by default — flipping this is the only way it changes behavior.
+portfolio_guard_enabled: false
+max_gross_exposure_pct: 1.5
 
 # Claude trade explanations.
 explanations_enabled: true

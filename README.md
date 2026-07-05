@@ -306,7 +306,12 @@ commented list). Highlights:
 Add an `accounts:` block to run several independent paper accounts side by side,
 each with its own strategy, markets, starting cash, and SQLite DB
 (`trading.<name>.db`) — all surfaced in one dashboard with per-account tabs and a
-portfolio-total summary. Omit `accounts:` to keep the original single-account
+portfolio-total summary. The Total tab shows a **strategy comparison table**
+(per-account equity, return, realized/unrealized P&L, win rate over completed
+round trips, profit factor, 30-day max drawdown/Sharpe, fees, open positions —
+from the per-account `stats` block the bot exports) plus a **combined exposure**
+line (gross long/short and net, by asset, summed across all accounts — the
+accounts trade independently, so this is where a correlated all-in lean shows up). Omit `accounts:` to keep the original single-account
 behavior. `strategy_type` selects the algorithm from the registry in
 `strategies.py`:
 
@@ -320,6 +325,15 @@ behavior. `strategy_type` selects the algorithm from the registry in
   long-term trend MA (200-day by default), move to cash on a break below it.
   Built to recapture the buy-and-hold upside the tactical long-only accounts
   give up. Long/cash only.
+- `momentum_rotation` — cross-sectional relative strength: rank the account's
+  products by trailing `rotation_lookback_bars` return, hold ONLY the leader,
+  and only while the leader is above its own trend MA **and its trailing
+  return is positive** — otherwise cash (the least-bad loser is still a
+  loser). The one strategy that compares assets *against each other* instead
+  of against their own history. Long/cash only; price-only (no sentiment).
+  ⚠ Multi-year backtest validation is still outstanding (the backtester is
+  single-instrument; see `scripts/backtest.py`, which skips it). See
+  [ENABLING.md](ENABLING.md) before turning it on.
 
 ```yaml
 accounts:

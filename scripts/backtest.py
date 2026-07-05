@@ -80,6 +80,14 @@ def main(argv=None) -> int:
     for acct in config.accounts:
         cfg = _resolve(config, acct, fee_override=args.fee)
         strategy = make_strategy(cfg.strategy_type, cfg.strategy)
+        if getattr(strategy, "requires_universe", False):
+            print(
+                f"  [{acct.name}] {cfg.strategy_type}: skipped — cross-sectional "
+                f"strategies rank the whole universe at once, which this "
+                f"single-instrument backtester can't replay yet.",
+                file=sys.stderr,
+            )
+            continue
         for product in cfg.products:
             try:
                 candles = market.get_history(product, granularity=granularity, count=count)

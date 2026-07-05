@@ -265,3 +265,50 @@ def test_trailing_stop_ratchets_up():
     assert eng._protective_exit("BTC-USD", pos, 1410.0, 50.0, candles) is None
     # 1390 fell below the ratcheted stop -> exit, even though far above entry.
     assert eng._protective_exit("BTC-USD", pos, 1390.0, 50.0, candles) is not None
+
+
+class EquityRecordingStorage(RecordingStorage):
+    def __init__(self):
+        super().__init__()
+        self.equity_snapshots = []
+
+    def save_equity(self, cash, market_value, equity):
+        self.equity_snapshots.append((cash, market_value, equity))
+
+
+class FailingMarketData:
+    """First product fetches fine; the second raises (simulating an outage)."""
+
+    def __init__(self, candles, failing_product):
+        self._candles = candles
+        self._failing = failing_product
+
+    def get_candles(self, product_id):
+        if product_id == self._failing:
+            raise RuntimeError("exchange down")
+        return self._candles
+
+
+def test_equity_snapshot_skipped_when_open_position_unpriced():
+    # Holding ETH, but this tick ETH's candle fetch fails: market_value() would
+    # value the position at zero and record a false equity dip. The snapshot
+    # must be skipped; ticks with full prices snapshot normally.
+    candles = [
+        {"time": i, "open": 100, "high": 101, "low": 99, "close": 100}
+        for i in range(5)
+    ]
+    eng = make_engine(starting_cash=10_000, products=["BTC-USD", "ETH-USD"])
+    rec = EquityRecordingStorage()
+    eng.storage = rec
+    eng.strategy = FakeStrategy(
+        Signal(product_id="x", action=HOLD, price=100.0, indicators={"atr": 5.0})
+    )
+    _open_long(eng, "ETH-USD", price=100.0, qty=1.0)
+
+    eng.market_data = FailingMarketData(candles, failing_product="ETH-USD")
+    eng.tick()
+    assert rec.equity_snapshots == [], "snapshot with an unpriced open position"
+
+    eng.market_data = FakeMarketData(candles)  # both products price fine now
+    eng.tick()
+    assert len(rec.equity_snapshots) == 1
