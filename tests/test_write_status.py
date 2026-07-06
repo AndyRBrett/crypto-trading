@@ -157,6 +157,64 @@ def test_benchmark_and_equity_curve(tmp_path):
     assert curve[0]["equity"] == 1000.0 and curve[-1]["equity"] == 1010.0
 
 
+def test_merge_equity_seeds_from_pre_window_snapshots():
+    """Regression (2026-06-29 artifact): clipping each store to the reporting
+    window *before* merging left the forward-fill with no seed, so each store
+    contributed $0 until its first in-window snapshot landed — on a 5-store
+    book the curve opened at one store's $10k and "5x'd" to $49.5k. Snapshots
+    from before ``clip_start`` must seed the fill; only points at-or-after it
+    are emitted."""
+    a = [(50.0, 100.0), (110.0, 101.0), (120.0, 102.0)]
+    b = [(60.0, 200.0), (111.0, 201.0)]
+    curve = write_status._merge_equity([a, b], clip_start=100.0)
+    assert curve == [(110.0, 301.0), (111.0, 302.0), (120.0, 303.0)]
+
+
+def test_merge_equity_drops_retired_store():
+    """A store whose last snapshot predates the curve start is retired (e.g.
+    the legacy single-account trading.db), not merely quiet — it must not
+    forward-fill stale equity into the whole curve."""
+    live = [(50.0, 100.0), (110.0, 101.0)]
+    retired = [(10.0, 500.0), (20.0, 500.0)]
+    assert write_status._merge_equity([live, retired], clip_start=100.0) == [(110.0, 101.0)]
+    # Same rule under the risk window's common-start clip: without it the dead
+    # store's constant equity inflates the whole risk curve's level, muting
+    # drawdown/volatility percentages.
+    assert write_status._merge_equity([live, retired], clip_to_common_start=True) == [
+        (50.0, 100.0),
+        (110.0, 101.0),
+    ]
+
+
+def test_equity_curve_first_point_sums_all_live_stores(tmp_path):
+    """End-to-end regression for the 2026-06-29 $10k -> $49.5k status jump:
+    the headline curve's first point must already sum every live store (each
+    seeded from its last pre-window snapshot), not ramp up store-by-store."""
+    now = 2_000_000_000.0
+    day = 86_400
+    # Two stores whose first in-window snapshots land at different times; both
+    # have pre-window history to seed from.
+    for name, first_in_window, eq in (
+        ("a", now - 5 * day, 1000.0),
+        ("b", now - 4 * day, 2000.0),
+    ):
+        s = Storage(os.path.join(str(tmp_path), f"trading.{name}.db"))
+        for ts in (now - 20 * day, first_in_window, now - 60):
+            s.conn.execute(
+                "INSERT INTO equity(timestamp, cash, market_value, equity) VALUES (?,?,?,?)",
+                (ts, eq, 0.0, eq),
+            )
+        s.conn.commit()
+        s.close()
+    os.chdir(str(tmp_path))
+
+    curve = write_status.collect_metrics(now)["equity_curve"]
+    # Only in-window timestamps are emitted (3 distinct), and every point sums
+    # both stores — no cold-start ramp.
+    assert len(curve) == 3
+    assert [p["equity"] for p in curve] == [3000.0, 3000.0, 3000.0]
+
+
 def test_no_benchmark_without_deployed_capital(tmp_path):
     now = 2_000_000_000.0
     s = Storage(os.path.join(str(tmp_path), "trading.flat.db"))

@@ -76,7 +76,9 @@ def _iso(ts: float) -> str:
 
 
 def _merge_equity(
-    series: list[list[tuple[float, float]]], clip_to_common_start: bool = False
+    series: list[list[tuple[float, float]]],
+    clip_start: float | None = None,
+    clip_to_common_start: bool = False,
 ) -> list[tuple[float, float]]:
     """Sum per-store equity snapshots into one full-resolution portfolio curve.
 
@@ -86,19 +88,40 @@ def _merge_equity(
     sum across stores. For the common single-store case this is just that store's
     own curve.
 
-    When ``clip_to_common_start`` is set, the curve starts only once *every* store
-    has reported at least once. Before that point the sum understates the book (a
-    store that hasn't ticked yet contributes nothing), which would read as a huge
-    spurious return the first time it comes online — fine for a rough dashboard
-    line, but it would wreck Sharpe/Sortino, so the risk window clips it off.
+    ``clip_start`` emits only points at-or-after that timestamp while keeping
+    earlier snapshots as forward-fill seeds. Pass the reporting window's start
+    (with each store's series loaded from *before* it) so the curve's first
+    point already sums every live store. Clipping each store's series to the
+    window before merging instead leaves no seed: a store contributes $0 until
+    its first in-window snapshot lands, so a 5-store book "5x'd" over the first
+    few points of every status file (the 2026-06-29 $10k -> $49.5k artifact).
+
+    When ``clip_to_common_start`` is set, the curve instead starts only once
+    *every* store has reported at least once. Before that point the sum
+    understates the book (a store with no earlier history to seed from
+    contributes nothing), which would read as a huge spurious return the first
+    time it comes online — it would wreck Sharpe/Sortino, so the risk window
+    clips it off.
+
+    With either clip, a store whose *last* snapshot predates the curve start is
+    retired (e.g. the legacy single-account trading.db), not merely quiet — it
+    is dropped entirely rather than forward-filled forever into a book it is no
+    longer part of.
     """
     series = [s for s in series if s]
     if not series:
         return []
-    timestamps = sorted({ts for s in series for ts, _ in s})
     if clip_to_common_start:
-        common_start = max(s[0][0] for s in series)  # latest first-snapshot
-        timestamps = [ts for ts in timestamps if ts >= common_start]
+        # max-of-firsts can't belong to a store that's dropped below (a store's
+        # last >= its first), so computing it up front is stable.
+        clip_start = max(s[0][0] for s in series)  # latest first-snapshot
+    if clip_start is not None:
+        series = [s for s in series if s[-1][0] >= clip_start]
+        if not series:
+            return []
+    timestamps = sorted({ts for s in series for ts, _ in s})
+    if clip_start is not None:
+        timestamps = [ts for ts in timestamps if ts >= clip_start]
     ts_lists = [[ts for ts, _ in s] for s in series]
     eq_lists = [[eq for _, eq in s] for s in series]
     curve: list[tuple[float, float]] = []
@@ -112,10 +135,12 @@ def _merge_equity(
     return curve
 
 
-def _aggregate_equity(series: list[list[tuple[float, float]]]) -> list[tuple[float, float]]:
+def _aggregate_equity(
+    series: list[list[tuple[float, float]]], clip_start: float | None = None
+) -> list[tuple[float, float]]:
     """Portfolio-wide equity curve downsampled for the status file's dashboard
     chart: at most ``MAX_EQUITY_POINTS`` points, first and last always kept."""
-    curve = _merge_equity(series)
+    curve = _merge_equity(series, clip_start=clip_start)
     if len(curve) > MAX_EQUITY_POINTS:
         step = (len(curve) - 1) / (MAX_EQUITY_POINTS - 1)
         idxs = sorted({round(k * step) for k in range(MAX_EQUITY_POINTS)})
@@ -162,8 +187,10 @@ def collect_metrics(now: float | None = None) -> dict:
     buy_notional: dict[str, float] = {}            # strategy capital deployed per symbol
     first_mark: dict[str, tuple[float, float]] = {}  # earliest (ts, price) seen per symbol
     last_mark: dict[str, tuple[float, float]] = {}   # latest (ts, price) seen per symbol
-    equity_series: list[list[tuple[float, float]]] = []  # 7-day curve, per store
-    risk_equity_series: list[list[tuple[float, float]]] = []  # risk window, per store
+    # Per-store snapshots over the full load window (risk lookback); the 7-day
+    # headline curve is clipped at merge time so pre-window points still seed
+    # the forward-fill (see _merge_equity).
+    equity_series: list[list[tuple[float, float]]] = []
     # Per-signal decision log for the run that just executed (issue #23).
     decisions: list[dict] = []
 
@@ -199,9 +226,7 @@ def collect_metrics(now: float | None = None) -> dict:
                     (equity_load_start,),
                 )
             ]
-            risk_equity_series.append(store_equity)
-            # The headline curve is the 7-day tail of the same load.
-            equity_series.append([p for p in store_equity if p[0] >= head_start])
+            equity_series.append(store_equity)
             conn.close()
         except sqlite3.Error as exc:
             errors.append(f"{path}: {exc}")
@@ -284,7 +309,7 @@ def collect_metrics(now: float | None = None) -> dict:
         benchmark = _benchmark(pnl[WINDOW_DAYS], buy_notional, first_mark, last_mark)
         if benchmark is not None:
             status["benchmark"] = benchmark
-        curve = _aggregate_equity(equity_series)
+        curve = _aggregate_equity(equity_series, clip_start=head_start)
         if curve:
             status["equity_curve"] = [
                 {"t": _iso(ts), "equity": round(eq, 2)} for ts, eq in curve
@@ -294,7 +319,7 @@ def collect_metrics(now: float | None = None) -> dict:
         # regression? Computed from the persisted equity curve over a 30-day
         # lookback; clip the cold-start ramp so a store coming online mid-window
         # isn't read as a return. Omitted when there isn't enough curve to measure.
-        risk_curve = _merge_equity(risk_equity_series, clip_to_common_start=True)
+        risk_curve = _merge_equity(equity_series, clip_to_common_start=True)
         risk = risk_metrics(risk_curve, now=now)
         if risk:
             status["risk_metrics"] = risk
