@@ -395,6 +395,24 @@ python -m scripts.backtest --granularity ONE_DAY # different timeframe
 Each row reports one strategy on one product. Use it to compare changes head-to-head
 instead of waiting weeks for live signal to accrue.
 
+### What-if threshold replay
+
+The backtester answers "how would these settings have traded over years of
+candles?"; the threshold replay answers a narrower live question: "the bot
+evaluated N signals and rejected most of them — which threshold values would
+have captured those exact signals, and would that have beaten buy-and-hold?"
+It sweeps candidate entry/exit thresholds over the logged per-tick decisions in
+each account's `signal_log` (the features snapshot records the indicators and
+how close each gate came to firing) and reports the hypothetical entries, P&L,
+and alpha vs. holding the same capital. Decision support only — it never
+touches the live config:
+
+```bash
+# pull the live DBs from the bot-state branch first, then:
+python -m scripts.threshold_replay --config config.ci.yaml --state-dir /tmp/state
+python -m scripts.threshold_replay --account mean_reversion --param rsi_mr_oversold=30,35,40
+```
+
 ## Testing
 
 ```bash
