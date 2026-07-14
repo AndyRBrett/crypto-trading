@@ -50,15 +50,50 @@ jobs:
       # Publish overseer-status.json for the external Project Overseer monitor
       # (issue #16). The tick above pulls each account's trading.<name>.db into
       # the workspace, so write_status.py reads the real trade store here. This
-      # workflow ticks hourly but the monitor only needs a daily refresh
-      # (staleness is judged from generated_at), so we publish once a day at
-      # 06:00 UTC — keeping main's history clean. A manual run always publishes.
+      # workflow ticks hourly but the monitor only needs a daily refresh, so we
+      # publish at most once a day to keep main's history clean.
+      #
+      # We gate on how long it's been since the last publish (the committed
+      # generated_at), NOT on a fixed wall-clock hour. GitHub's scheduled crons
+      # are best-effort and routinely skip or delay a specific hour, so the old
+      # "only publish when the UTC hour is exactly 06" gate kept missing its
+      # window and silently froze this file for days (issue #34) — the bot was
+      # ticking fine, but no hourly run ever landed in the 06:00 slot. Tying the
+      # publish to elapsed time means whichever hourly run first crosses the
+      # threshold does the publish, so a dropped cron slot no longer freezes it.
+      # A manual run always publishes. If the last time can't be read, we publish
+      # rather than skip — silent skipping is exactly the failure mode of #34.
       - name: Publish overseer status
         env:
           EVENT_NAME: ${{ github.event_name }}
+          # Publish once the committed status is at least this many hours old.
+          # 20h (< 24) leaves margin so a slightly-earlier run the next day still
+          # qualifies, while staying well under one publish per day in practice.
+          MIN_AGE_HOURS: "20"
         run: |
-          if [ "$EVENT_NAME" != "workflow_dispatch" ] && [ "$(date -u +%H)" != "06" ]; then
-            echo "Not the daily publish window (hour $(date -u +%H)); skipping."
+          publish=1
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            last=$(jq -r '.generated_at // empty' overseer-status.json 2>/dev/null || true)
+            # Guard the empty case first: GNU `date -d ""` succeeds and returns
+            # "now" (age 0h -> skip), which would re-create #34's silent skip
+            # when the status file is missing or has no generated_at.
+            last_epoch=""
+            if [ -n "$last" ]; then
+              last_epoch=$(date -u -d "$last" +%s 2>/dev/null || echo "")
+            fi
+            if [ -n "$last_epoch" ]; then
+              age_hours=$(( ($(date -u +%s) - last_epoch) / 3600 ))
+              if [ "$age_hours" -lt "$MIN_AGE_HOURS" ]; then
+                echo "Last publish was ${age_hours}h ago (< ${MIN_AGE_HOURS}h); skipping."
+                publish=0
+              else
+                echo "Last publish was ${age_hours}h ago (>= ${MIN_AGE_HOURS}h); publishing."
+              fi
+            else
+              echo "Could not read last publish time; publishing to be safe."
+            fi
+          fi
+          if [ "$publish" != "1" ]; then
             exit 0
           fi
           python write_status.py
