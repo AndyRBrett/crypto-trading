@@ -21,7 +21,7 @@ import sys
 
 from bot.config import Config
 from bot.market_data import MarketData
-from bot.sweep import DEFAULT_GRIDS, sweep
+from bot.sweep import DEFAULT_GRIDS, sweep, walk_forward
 
 
 def _parse_value(s: str):
@@ -50,6 +50,15 @@ def main(argv=None) -> int:
     parser.add_argument("--top", type=int, default=15, help="rows to print")
     parser.add_argument("--param", action="append", default=[],
                         help="override a grid axis, e.g. --param fast_period=10,20,30")
+    parser.add_argument("--walk-forward", type=int, default=0, metavar="FOLDS",
+                        help="run walk-forward analysis with FOLDS rolling splits "
+                             "instead of a single holdout (issue #39). Re-tunes on "
+                             "each training window and scores only what it picked "
+                             "on the window after it.")
+    parser.add_argument("--anchored", action="store_true",
+                        help="with --walk-forward, train from the start of the "
+                             "series each fold (expanding window) instead of a "
+                             "fixed-length rolling window")
     args = parser.parse_args(argv)
 
     config = Config.load(args.config)
@@ -78,6 +87,45 @@ def main(argv=None) -> int:
     combos = 1
     for v in grid.values():
         combos *= len(v)
+
+    if args.walk_forward:
+        print(
+            f"Walk-forward — {args.strategy} {args.product} {granularity} "
+            f"candles={len(candles)} fee={config.fee_rate:.4f} "
+            f"folds={args.walk_forward} "
+            f"{'anchored' if args.anchored else 'rolling'} grid~{combos} combos\n"
+            f"axes: " + "  ".join(f"{k}={v}" for k, v in grid.items()) + "\n" + "-" * 100
+        )
+
+        def _fold_progress(done, total):
+            print(f"\r  fold {done}/{total}...", end="", file=sys.stderr, flush=True)
+
+        try:
+            wf = walk_forward(args.strategy, candles, config, grid=grid,
+                              product_id=args.product, folds=args.walk_forward,
+                              anchored=args.anchored, progress=_fold_progress)
+        except ValueError as exc:
+            print("", file=sys.stderr)
+            print(f"walk-forward not possible: {exc}", file=sys.stderr)
+            return 1
+        print("", file=sys.stderr)
+        for fold in wf.folds:
+            print("  " + fold.line())
+        print("-" * 100)
+        print(wf.summary())
+        # The honest read, stated so it cannot be skipped: out-of-sample return is
+        # the only number here that was not chosen with hindsight.
+        if wf.oos_return_pct <= 0:
+            print("\nVERDICT: no out-of-sample edge. Re-tuning on a schedule would "
+                  "still have lost money — do not deploy this grid.")
+        elif wf.param_stability < 0.5:
+            print("\nVERDICT: positive out-of-sample, but the winning settings moved "
+                  "in more than half the folds. That instability is what a curve fit "
+                  "looks like; treat the return as unproven.")
+        else:
+            print("\nVERDICT: positive out-of-sample with reasonably stable settings "
+                  "-- the strongest evidence this harness can offer.")
+        return 0
     print(
         f"Sweep — {args.strategy} {args.product} {granularity} "
         f"candles={len(candles)} fee={config.fee_rate:.4f} holdout={args.holdout:.0%} "

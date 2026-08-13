@@ -185,3 +185,190 @@ def sweep(
 
     runs.sort(key=lambda r: r.in_sample.total_return_pct, reverse=True)
     return runs
+
+
+# ── WALK-FORWARD ─────────────────────────────────────────────────────────────
+# `holdout` answers "does this setting survive one unseen tail?". That is one
+# draw from a very noisy distribution: move the split by a week and the winner
+# often changes, which is exactly how a curve fit passes a holdout and then
+# loses money live. Walk-forward asks the harder question — "if I had re-tuned
+# on a schedule and traded only what the tuning chose, what would I have made?"
+# Each fold optimises on its training window and is then scored on the window
+# immediately after it, which the optimiser never saw. Chaining those
+# out-of-sample segments is the closest offline analogue of actually running it.
+#
+# The critical difference from a sweep: a sweep reports in AND out for every
+# combo, so it is tempting to read the out-of-sample column of the best
+# in-sample row. Walk-forward SELECTS per fold and scores only the selection —
+# no peeking, because the choice is made before the test window is touched.
+
+# Minimum folds for a walk-forward to say anything. Below this the result is one
+# or two draws again and inherits the very noise this is meant to average out.
+MIN_FOLDS = 3
+
+
+@dataclass
+class WalkForwardFold:
+    index: int
+    train_bars: int
+    test_bars: int
+    chosen: dict                      # params the optimiser picked on train
+    in_sample: BacktestResult         # the chosen params over the train window
+    out_sample: BacktestResult        # the SAME params over the unseen test window
+
+    def line(self) -> str:
+        params = "  ".join(f"{k}={v}" for k, v in self.chosen.items())
+        return (
+            f"fold {self.index:>2}  train {self.train_bars:>5}b  test {self.test_bars:>4}b  "
+            f"in {self.in_sample.total_return_pct:+6.2f}%  "
+            f"out {self.out_sample.total_return_pct:+6.2f}%  "
+            f"tr {self.out_sample.num_trades:>2}   [{params}]"
+        )
+
+
+@dataclass
+class WalkForwardResult:
+    folds: list[WalkForwardFold]
+    anchored: bool
+
+    @property
+    def oos_return_pct(self) -> float:
+        """Compounded out-of-sample return across folds.
+
+        Compounded, not summed: the folds are sequential and each one trades the
+        equity the previous one left behind. Summing would overstate a losing
+        sequence and understate a winning one.
+        """
+        equity = 1.0
+        for f in self.folds:
+            equity *= 1 + f.out_sample.total_return_pct / 100
+        return (equity - 1) * 100
+
+    @property
+    def oos_trades(self) -> int:
+        return sum(f.out_sample.num_trades for f in self.folds)
+
+    @property
+    def oos_win_rate(self) -> float:
+        wins = sum(f.out_sample.wins for f in self.folds)
+        losses = sum(f.out_sample.losses for f in self.folds)
+        return wins / (wins + losses) if (wins + losses) else 0.0
+
+    @property
+    def worst_fold_pct(self) -> float:
+        return min((f.out_sample.total_return_pct for f in self.folds), default=0.0)
+
+    @property
+    def positive_folds(self) -> int:
+        return sum(1 for f in self.folds if f.out_sample.total_return_pct > 0)
+
+    @property
+    def param_stability(self) -> float:
+        """Fraction of folds that re-picked the single most common parameter set.
+
+        The tell that separates a real edge from a curve fit. A strategy whose
+        optimum jumps to a different corner of the grid every fold has no stable
+        setting to trade — a high average return built on that is an artifact of
+        re-tuning, not something you could have captured.
+        """
+        if not self.folds:
+            return 0.0
+        counts: dict[str, int] = {}
+        for f in self.folds:
+            key = repr(sorted(f.chosen.items()))
+            counts[key] = counts.get(key, 0) + 1
+        return max(counts.values()) / len(self.folds)
+
+    def summary(self) -> str:
+        return (
+            f"walk-forward ({'anchored' if self.anchored else 'rolling'}, "
+            f"{len(self.folds)} folds)\n"
+            f"  out-of-sample return  {self.oos_return_pct:+.2f}% (compounded)\n"
+            f"  trades / win rate     {self.oos_trades} / {self.oos_win_rate*100:.0f}%\n"
+            f"  positive folds        {self.positive_folds}/{len(self.folds)}\n"
+            f"  worst fold            {self.worst_fold_pct:+.2f}%\n"
+            f"  parameter stability   {self.param_stability*100:.0f}% "
+            f"(share of folds re-picking the same settings)"
+        )
+
+
+def walk_forward(
+    strategy_type: str,
+    candles: Sequence[dict],
+    base_config,
+    grid: dict[str, list] | None = None,
+    product_id: str = "BTC-USD",
+    folds: int = 5,
+    anchored: bool = False,
+    progress=None,
+) -> WalkForwardResult:
+    """Rolling-origin walk-forward analysis.
+
+    Splits the series into ``folds`` sequential test windows. For each, the grid
+    is optimised on everything before it (``anchored``: from the very start;
+    otherwise: a rolling window the same length as the training block) and the
+    winning parameters alone are then scored on the test window.
+
+    ``progress``: optional callable(done, total_folds).
+
+    Raises ValueError if the series cannot support ``folds`` usable splits —
+    silently returning fewer would let a two-fold result be read as a five-fold
+    one.
+    """
+    candles = list(candles)
+    n = len(candles)
+    if folds < MIN_FOLDS:
+        raise ValueError(f"folds must be >= {MIN_FOLDS}; got {folds}")
+
+    # One test block per fold, with the first block reserved as the initial
+    # training set — so a k-fold run needs k+1 blocks.
+    block = n // (folds + 1)
+    probe = make_strategy(strategy_type, base_config.strategy)
+    min_c = probe.min_candles()
+    if block <= min_c:
+        raise ValueError(
+            f"series too short for {folds} folds: each block is {block} bars but "
+            f"{strategy_type} needs more than {min_c} to produce a signal. "
+            f"Use fewer folds or a longer history."
+        )
+
+    out: list[WalkForwardFold] = []
+    for i in range(folds):
+        test_start = block * (i + 1)
+        test_end = test_start + block if i < folds - 1 else n
+        train_start = 0 if anchored else max(0, test_start - block)
+        train = candles[train_start:test_start]
+        test = candles[test_start:test_end]
+        if len(train) <= min_c or len(test) <= min_c:
+            continue
+
+        # Optimise on train only. holdout=0: the test window is this fold's
+        # out-of-sample, so carving another one out of train would shrink the
+        # fit for no benefit.
+        ranked = sweep(strategy_type, train, base_config, grid=grid,
+                       product_id=product_id, holdout=0.0)
+        if not ranked:
+            continue
+        best = ranked[0]
+
+        # Score the chosen params on the unseen block, prepending warmup bars so
+        # the strategy enters the window spun up — same convention _run_combo
+        # uses for holdout, so trades still occur only inside the test region.
+        cfg, scfg = _apply(base_config, best.params)
+        strat = make_strategy(strategy_type, scfg)
+        warm = train[-strat.min_candles():]
+        oos = run_backtest(strat, warm + test, cfg, product_id)
+
+        out.append(WalkForwardFold(
+            index=i + 1, train_bars=len(train), test_bars=len(test),
+            chosen=best.params, in_sample=best.in_sample, out_sample=oos,
+        ))
+        if progress is not None:
+            progress(i + 1, folds)
+
+    if len(out) < MIN_FOLDS:
+        raise ValueError(
+            f"only {len(out)} usable folds from {n} bars — need at least "
+            f"{MIN_FOLDS}. Use a longer history or fewer folds."
+        )
+    return WalkForwardResult(folds=out, anchored=anchored)
