@@ -59,6 +59,11 @@ WINDOW_DAYS = 7
 EXTRA_WINDOW_DAYS = (30, 90)
 # Below this many closed trades, a window's win_rate is small-sample noise.
 LOW_SAMPLE_TRADES = 10
+# A signal that came within this % of its trigger was a near-miss, not a quiet
+# market (issue #38). At 0.5% the price was effectively at the threshold and the
+# strategy still declined — repeated near-misses mean the setting is too tight,
+# whereas gaps of several percent mean there was genuinely nothing to trade.
+NEAR_TRIGGER_PCT = 0.5
 STATUS_PATH = "overseer-status.json"
 DB_GLOB = "trading*.db"  # per-account (trading.<name>.db) + legacy trading.db
 # A tick logs one signal_log row per product (including HOLDs). run-bot ticks at
@@ -341,6 +346,11 @@ def collect_metrics(now: float | None = None) -> dict:
             status["rejection_reasons"] = rejections
         if slippages:
             status["avg_slippage_bps"] = round(sum(slippages) / len(slippages), 2)
+        # How near the non-acting signals came to firing (issue #38) — turns
+        # "0 of 10 acted" from a bare fact into a diagnosis.
+        proximity = signal_proximity(decisions)
+        if proximity:
+            status["signal_proximity"] = proximity
     status["last_fill_at"] = _iso(last_fill) if last_fill is not None else None
     status["errors"] = errors
     return status
@@ -392,6 +402,84 @@ def _store_decisions(conn: sqlite3.Connection, run_since: float) -> list[dict]:
                 decision["thresholds"] = feats["thresholds"]
         out.append(decision)
     return out
+
+
+def signal_proximity(decisions, near_pct=NEAR_TRIGGER_PCT):
+    """Aggregate how CLOSE non-acting signals came to firing (issue #38).
+
+    ``signals_acted: 0 / signals_evaluated: 10`` states that nothing fired but
+    not why, and the two explanations call for opposite responses:
+
+      quiet market    price sat far from its trigger all window. The thresholds
+                      are fine and there was simply nothing to trade — doing
+                      nothing was correct, so leave the settings alone.
+      miscalibrated   price repeatedly came within a hair of the trigger and
+                      never crossed. The strategy is watching the right move and
+                      declining to take it; the threshold wants widening.
+
+    Telling them apart needs the *distribution* of the distance-to-trigger, not
+    merely its presence. ``closest_pct`` is the single most useful number: the
+    smallest gap between price and its trigger across the window. A window whose
+    closest approach was 5% never had a trade in it; one that repeatedly grazed
+    0.2% is a threshold problem.
+
+    Returns None when no decision carried thresholds, so the key is absent from
+    the status file rather than present and meaningless.
+    """
+    # Grouped BY METRIC, never pooled. Each strategy publishes its own threshold
+    # keys and they are not in the same units: donchian reports breakout_dist_pct
+    # and exit_dist_pct in percent, while the trend/RSI strategies report
+    # rsi_to_overbought and adx_to_min in index POINTS. Averaging 0.4% against
+    # 39.5 RSI points would produce a confident, meaningless number — and since
+    # only 2 of 10 live decisions carry the donchian keys, reading just those
+    # would silently describe a fifth of the evidence as though it were all of it.
+    per_metric: dict[str, list[float]] = {}
+    for d in decisions:
+        for key, raw in (d.get("thresholds") or {}).items():
+            if raw is None:
+                continue
+            try:
+                gap = abs(float(raw))
+            except (TypeError, ValueError):
+                continue  # convert BEFORE creating the key, or a metric whose
+                          # every value is unparseable leaves an empty list here
+                          # and the summary below indexes off the end of it
+            per_metric.setdefault(key, []).append(gap)
+    if not per_metric:
+        return None
+
+    metrics, near_total, pct_samples = {}, 0, 0
+    for key, gaps in sorted(per_metric.items()):
+        gaps.sort()
+        mid = len(gaps) // 2
+        median = gaps[mid] if len(gaps) % 2 else (gaps[mid - 1] + gaps[mid]) / 2
+        entry = {
+            "samples": len(gaps),
+            "closest": round(gaps[0], 3),
+            "median": round(median, 3),
+            "widest": round(gaps[-1], 3),
+        }
+        # The near-miss test only applies to percentage-denominated gaps, where
+        # NEAR_TRIGGER_PCT means something. Point-denominated ones (RSI, ADX) are
+        # still reported for the chart, but they do not vote on the verdict.
+        if key.endswith("_pct"):
+            entry["near_trigger"] = sum(1 for g in gaps if g <= near_pct)
+            near_total += entry["near_trigger"]
+            pct_samples += len(gaps)
+        metrics[key] = entry
+
+    return {
+        "metrics": metrics,
+        "near_threshold_pct": near_pct,
+        "pct_samples": pct_samples,
+        "near_trigger": near_total,
+        # Precomputed so the dashboard and the overseer's agents reach the same
+        # conclusion from the same rule instead of each inventing a cutoff.
+        # Unknown, not "quiet", when no percentage-denominated gap was recorded:
+        # absence of evidence isn't evidence of a quiet market.
+        "verdict": ("thresholds-may-be-tight" if near_total
+                    else "quiet-market" if pct_samples else "unknown"),
+    }
 
 
 def _benchmark(
