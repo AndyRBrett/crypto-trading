@@ -50,6 +50,7 @@ bot/
   portfolio.py     paper portfolio: cash, positions, cost basis, P&L
   storage.py       SQLite (durable) + dashboard JSON export
   explain.py       Claude trade explanations (+ deterministic fallback)
+  notifier.py      Web Push alerts to the dashboard PWA (trades, highs, heartbeat)
   publish.py       push state.json to GitHub Pages (phone viewing)
   engine.py        one tick for ONE account: data -> signal -> trade -> persist
   runner.py        orchestrates multiple accounts -> one combined dashboard
@@ -153,6 +154,53 @@ last fetched state). The data updates whenever the bot is running and pushing.
 > The bot must be running somewhere to push fresh data. Run it on your laptop,
 > or set up always-on cloud runs (below) so it keeps going without you.
 
+## Push notifications
+
+The dashboard PWA doubles as the notification channel — no extra app. The bot
+alerts you on:
+
+- **every closed round trip**, win or loss (`notify_on_loss: false` to get wins
+  only);
+- **a new portfolio all-time high** (needs to clear the previous peak by 0.5%);
+- **a heartbeat** when `heartbeat_days` (default 7) pass with no alert at all.
+
+The heartbeat exists because the first two only fire when something happens. A
+long-only bot parked in cash through a downtrend can legitimately go weeks
+without trading, and from the phone that is indistinguishable from a crashed
+workflow or an expired subscription. The heartbeat makes healthy-and-idle say so.
+
+### Setup
+
+```bash
+python -m scripts.vapid_keygen     # generate a keypair
+```
+
+1. Add the printed private key as the `VAPID_PRIVATE_KEY` secret (repo →
+   Settings → Secrets and variables → Actions), or to `.env` locally.
+2. Let the bot tick once. It derives the matching **public** key and publishes it
+   as `vapid_public_key` in `state.json`.
+3. Open the dashboard on your phone (iOS: add to Home Screen first), tap 🔔, and
+   allow notifications. The page subscribes with the key the bot published, so
+   the two halves cannot drift apart.
+4. Copy the subscription JSON into the `PUSH_SUBSCRIPTION` secret.
+5. Run the **Test push notification** workflow to confirm delivery.
+
+> ⚠️ **Rotating `VAPID_PRIVATE_KEY` kills every existing subscription.** A push
+> subscription is permanently bound to the key it was created with; afterwards
+> the push service rejects every message with `VapidPkHashMismatch`. Always
+> re-subscribe (steps 3–4) after a rotation.
+
+### When notifications stop
+
+`scripts/test_push.py` fails the job when the push service rejects the message
+and prints what to do about it — a green run means the message was genuinely
+accepted. The bot also records the last delivery failure and reports it in
+`overseer-status.json` under `errors` (`push notification failing: …`), alongside
+`last_notify_at`, so a dead channel shows up in monitoring instead of just
+looking like a quiet week. Settings that are enabled but inert for want of a
+secret (e.g. `sentiment_enabled: true` with no `ANTHROPIC_API_KEY`) are reported
+the same way, as `config: …`.
+
 ## Always-on (run it in the cloud)
 
 `.github/workflows/run-bot.yml` runs the bot on a schedule via GitHub Actions —
@@ -228,7 +276,7 @@ plus 30- and 90-day totals:
                    "thresholds": { "ma_gap_pct": -0.42, "rsi_to_overbought": 21.0,
                                    "price_to_trend_pct": -1.2, "adx_to_min": -5.0 } } ],
   "rejection_reasons": { "no_signal": 3, "size_zero": 1 }, "avg_slippage_bps": 3.1,
-  "last_fill_at": null, "errors": [] }
+  "last_fill_at": null, "last_notify_at": "...Z", "errors": [] }
 ```
 
 `generated_at` is how staleness is judged; `win_rate` (0–1) is included once
@@ -270,6 +318,11 @@ that need dispersion (or, for Sortino, a losing day) are omitted when the curve
 can't support them. See `bot/metrics.py` for the full convention. The dashboard
 renders the same numbers in a "Risk-adjusted metrics" panel, computed client-side
 from the equity curve in `state.json`.
+
+`last_notify_at` is the last push the bot successfully delivered, and `errors`
+carries any delivery failure (`push notification failing: …`) or enabled-but-inert
+setting (`config: …`). Without these a rejected push was invisible: every trading
+metric stayed healthy while the phone went quiet.
 
 The always-on workflow regenerates and commits it once a day (right after a
 tick, so the trade stores are present), so the monitor always has a fresh

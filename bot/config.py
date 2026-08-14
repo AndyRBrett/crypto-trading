@@ -160,6 +160,15 @@ class Config:
     push_subscription: str = ""   # JSON from pushManager.subscribe() — via PUSH_SUBSCRIPTION env
     vapid_private_key: str = ""   # base64url raw P-256 scalar   — via VAPID_PRIVATE_KEY env
     vapid_claims_email: str = "mailto:bot@example.com"  # VAPID contact (can stay default)
+    # Notify on losing closes too, not just wins. Wins-only alerting makes a
+    # losing streak indistinguishable from a dead bot — the phone goes quiet
+    # either way, which is exactly when you most want to know.
+    notify_on_loss: bool = True
+    # Send a "still alive" summary when this many days pass with no push at all.
+    # 0 disables the heartbeat. A long-only bot parked in cash through a
+    # downtrend can legitimately go weeks without a trade; the heartbeat keeps
+    # that state distinguishable from a crashed workflow or a dead subscription.
+    heartbeat_days: float = 7.0
 
     # Secrets (populated from env, never written to disk by us).
     coinbase_api_key: str = ""

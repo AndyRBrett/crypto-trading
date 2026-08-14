@@ -934,7 +934,18 @@ if ("serviceWorker" in navigator) {
 
 // --- Push notification subscription ---
 
-const VAPID_PUBLIC_KEY = "BCAYtguJZljmO5XG6Hb6PR2bfRuRYkqrHvnpP_c8TmMNnNmj6Uiv0V3gmpY2xUGYV8YclkCDGqgLRzcyw8_eGHE";
+// Fallback only. The authoritative key is `vapid_public_key` in state.json,
+// derived by the bot from the VAPID_PRIVATE_KEY it actually signs with.
+// A subscription is permanently bound to the key it was created with, so a
+// hardcoded constant silently breaks every subscription the moment the private
+// key is rotated — which is exactly what happened on 2026-07-01 and cost six
+// weeks of notifications (the push service rejected every message with
+// VapidPkHashMismatch). Prefer the published key; never let them drift.
+const VAPID_PUBLIC_KEY_FALLBACK = "BCAYtguJZljmO5XG6Hb6PR2bfRuRYkqrHvnpP_c8TmMNnNmj6Uiv0V3gmpY2xUGYV8YclkCDGqgLRzcyw8_eGHE";
+
+function activeVapidKey() {
+  return (lastState && lastState.vapid_public_key) || VAPID_PUBLIC_KEY_FALLBACK;
+}
 
 function _urlB64ToUint8(b64) {
   const pad = "=".repeat((4 - b64.length % 4) % 4);
@@ -956,19 +967,34 @@ async function doSubscribe() {
     const perm = await Notification.requestPermission();
     if (perm !== "granted") throw new Error("Notification permission denied.");
 
+    const key = activeVapidKey();
+    const published = !!(lastState && lastState.vapid_public_key);
+
     const reg = await navigator.serviceWorker.ready;
+    // An existing subscription is bound to whatever key it was created with, so
+    // re-subscribing against a rotated key requires tearing the old one down
+    // first — otherwise the browser hands back the stale one and the push
+    // service keeps rejecting every message.
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) await existing.unsubscribe();
+
     const sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: _urlB64ToUint8(VAPID_PUBLIC_KEY),
+      applicationServerKey: _urlB64ToUint8(key),
     });
     const json = JSON.stringify(sub);
 
+    const keyNote = published
+      ? `<p style="margin-top:10px">Subscribed against the key the bot is currently signing with (<code>${esc(key.slice(0, 12))}…</code>), read live from <code>state.json</code>.</p>`
+      : `<p style="margin-top:10px;color:var(--red)">⚠ <code>state.json</code> did not publish a <code>vapid_public_key</code>, so this used the built-in fallback. If <strong>VAPID_PRIVATE_KEY</strong> doesn't match it, pushes will be rejected — run <code>python -m scripts.vapid_keygen</code>, set the secret, wait for the next tick, then re-subscribe here.</p>`;
+
     // Show the JSON + instructions
     document.getElementById("notif-body").innerHTML = `
-      <p>✅ Subscribed! Copy the JSON below and add it as a GitHub Actions secret named <strong>PUSH_SUBSCRIPTION</strong> in your repo's Settings → Secrets → Actions.</p>
+      <p>✅ Subscribed! Copy the JSON below and replace the GitHub Actions secret named <strong>PUSH_SUBSCRIPTION</strong> in your repo's Settings → Secrets → Actions.</p>
       <textarea id="notif-json" readonly>${esc(json)}</textarea>
       <button id="notif-copy" onclick="copySubJson()">Copy to clipboard</button>
-      <p style="margin-top:10px">Also add your own <strong>VAPID_PRIVATE_KEY</strong> as a secret if you haven't already (see .env.example to generate one — never reuse a key from docs).</p>
+      ${keyNote}
+      <p style="margin-top:10px">Then run the <strong>Test push notification</strong> workflow — it now fails loudly if the push service rejects the message.</p>
     `;
   } catch (err) {
     document.getElementById("notif-body").innerHTML =

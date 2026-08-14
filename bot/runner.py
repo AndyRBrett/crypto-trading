@@ -18,12 +18,14 @@ import dataclasses
 import logging
 import os
 import tempfile
+import time
 
 from .config import Config
 from .coordinate import Coordinator
 from .engine import Engine
 from .explain import Explainer
 from .market_data import MarketData
+from .notifier import Notifier, derive_public_key
 from .portfolio_guard import PortfolioGuard
 from .publish import Publisher
 from .sentiment import SentimentAnalyzer
@@ -79,9 +81,24 @@ class Runner:
         self.publisher = publisher or Publisher(config)
         self.market_data = CachedMarketData(market_data or MarketData(config))
         self.explainer = explainer or Explainer(config)
+        # Runner-level notifier for the cross-account heartbeat. Per-trade alerts
+        # stay with the engine that made the trade.
+        self.notifier = Notifier(
+            config.push_subscription, config.vapid_private_key, config.vapid_claims_email
+        )
         self.analyzer = sentiment_analyzer
         if self.analyzer is None and config.sentiment_enabled:
             self.analyzer = SentimentAnalyzer(config)
+            # The Engine warns about this too, but only when IT builds the
+            # analyzer — on the multi-account path the Runner builds it first, so
+            # the warning never fired and sentiment sat silently neutral for
+            # months with sentiment_enabled: true in config.ci.yaml.
+            if not config.anthropic_api_key:
+                log.warning(
+                    "sentiment_enabled is set but ANTHROPIC_API_KEY is missing — every "
+                    "sentiment score will be a neutral 0.0 and trade explanations will "
+                    "use the templated fallback until a key is provided."
+                )
 
         self.accounts = config.accounts
         # One guard across all account engines: read-only exposure snapshot
@@ -151,6 +168,7 @@ class Runner:
             self.coordinator.claim_lease()
 
         self.market_data.clear()
+        self._record_config_warnings()
         all_trades: list = []
         for acct, engine in self.engines:
             all_trades += engine.tick()
@@ -167,12 +185,100 @@ class Runner:
         )
 
         self._export_combined()
+        self._maybe_heartbeat()
         if self.publisher.enabled:
             self.publisher.publish(self.config.dashboard_state_path)
         if self.coordinator.enabled:
             for acct, engine in self.engines:
                 self.coordinator.push_db_for(acct.name, engine.config.db_path)
         return all_trades
+
+    def _maybe_heartbeat(self) -> None:
+        """Push a "still alive" summary after a long stretch with no other push.
+
+        Trade and new-high alerts only fire when something good happens, so a
+        bot parked in cash through a downtrend is silent for weeks — identical
+        to a crashed workflow or an expired push subscription from the phone's
+        point of view. The heartbeat makes healthy-and-idle say so out loud.
+        """
+        days = getattr(self.config, "heartbeat_days", 0) or 0
+        if days <= 0 or not self.notifier.enabled or not self.engines:
+            return
+        last = max((engine.last_notify_at() for _, engine in self.engines), default=0.0)
+        now = time.time()
+        # First run with a fresh store has no history to measure silence against;
+        # start the clock rather than firing a heartbeat immediately.
+        if last <= 0:
+            self._record_notify(now)
+            return
+        if now - last < days * 86_400:
+            return
+
+        snap = self.portfolio_guard.snapshot()
+        quiet_days = (now - last) / 86_400
+        lines = []
+        for acct, engine in self.engines:
+            open_positions = [
+                pid for pid, p in engine.portfolio.positions.items() if p.quantity != 0
+            ]
+            # market_value() silently values unpriced products at zero, so a
+            # failed candle fetch would otherwise report a fictitious equity
+            # crash in the one alert meant to reassure.
+            unpriced = [pid for pid in open_positions if pid not in engine.last_prices]
+            if unpriced:
+                lines.append(f"{acct.name}: equity unavailable (no fresh price for {', '.join(unpriced)})")
+                continue
+            equity = engine.portfolio.total_equity(engine.last_prices)
+            ret = (equity / acct.starting_cash - 1) * 100 if acct.starting_cash else 0.0
+            lines.append(
+                f"{acct.name}: ${equity:,.0f} ({ret:+.1f}%, {len(open_positions)} open)"
+            )
+
+        ok = self.notifier.send(
+            title=f"CryptoBot alive — quiet for {quiet_days:.0f} days",
+            message=(
+                f"Total equity ${snap['equity']:,.2f}.\n"
+                + "\n".join(lines)
+                + f"\nNo trades to report; last alert {quiet_days:.0f} days ago."
+            ),
+            tags="heartbeat",
+        )
+        if ok:
+            self._record_notify(now)
+        else:
+            # A failed heartbeat is the single most important thing to surface:
+            # it is the only alert that fires when nothing else would.
+            log.error("Heartbeat push failed: %s", self.notifier.last_error)
+            self.engines[0][1].storage.set_meta("last_push_error", self.notifier.last_error)
+
+    def _record_config_warnings(self) -> None:
+        """Persist settings that are enabled but inert, so the overseer reports
+        them. A feature switched on in config with its secret missing degrades
+        silently — the bot keeps running and nothing anywhere says it is off."""
+        if not self.engines:
+            return
+        warnings = []
+        if self.config.sentiment_enabled and not self.config.anthropic_api_key:
+            warnings.append(
+                "sentiment_enabled is true but ANTHROPIC_API_KEY is missing "
+                "(scores pinned neutral; explanations templated)"
+            )
+        if self.config.push_subscription and not self.config.vapid_private_key:
+            warnings.append("PUSH_SUBSCRIPTION is set but VAPID_PRIVATE_KEY is missing")
+        if self.config.vapid_private_key and not self.config.push_subscription:
+            warnings.append("VAPID_PRIVATE_KEY is set but PUSH_SUBSCRIPTION is missing")
+        text = "\n".join(warnings)
+        # Only write on change: this store is pushed to the state branch every
+        # tick, so rewriting an identical value is pure churn.
+        store = self.engines[0][1].storage
+        if (store.get_meta("config_warnings") or "") != text:
+            store.set_meta("config_warnings", text)
+
+    def _record_notify(self, when: float) -> None:
+        """Persist the heartbeat clock on the first engine's store (the DBs are
+        synced to the state branch, so this survives ephemeral CI runners)."""
+        self.engines[0][1].storage.set_meta("last_notify_at", str(when))
+        self.engines[0][1].storage.set_meta("last_push_error", "")
 
     def _export_combined(self) -> None:
         prices: dict = {}
@@ -194,6 +300,7 @@ class Runner:
         export_combined_state(
             self.config.dashboard_state_path, blocks, prices, price_history,
             granularity=self.config.candle_granularity,
+            vapid_public_key=derive_public_key(self.config.vapid_private_key),
         )
 
     def status(self) -> list[dict]:

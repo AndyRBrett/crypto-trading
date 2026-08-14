@@ -167,6 +167,9 @@ def collect_metrics(now: float | None = None) -> dict:
     risk_start = now - RISK_WINDOW_DAYS * 86_400
     equity_load_start = min(head_start, risk_start)
     errors: list[str] = []
+    push_errors: set[str] = set()      # distinct push failures across the stores
+    config_warnings: set[str] = set()  # settings enabled but inert (missing secret)
+    last_notify: float | None = None   # most recent successful push, any account
 
     db_paths = sorted(glob.glob(DB_GLOB))
     if not db_paths:
@@ -227,6 +230,23 @@ def collect_metrics(now: float | None = None) -> dict:
                 )
             ]
             equity_series.append(store_equity)
+            # A rejected push is otherwise invisible: the bot keeps trading and
+            # every metric here stays healthy while the phone goes quiet. Surface
+            # it so a dead notification channel is a reported fault, not a guess.
+            try:
+                meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
+            except sqlite3.Error:
+                meta = {}
+            if meta.get("last_push_error"):
+                push_errors.add(meta["last_push_error"].splitlines()[0])
+            for warning in (meta.get("config_warnings") or "").splitlines():
+                if warning.strip():
+                    config_warnings.add(warning.strip())
+            if meta.get("last_notify_at"):
+                try:
+                    last_notify = max(last_notify or 0.0, float(meta["last_notify_at"]))
+                except ValueError:
+                    pass
             conn.close()
         except sqlite3.Error as exc:
             errors.append(f"{path}: {exc}")
@@ -342,6 +362,11 @@ def collect_metrics(now: float | None = None) -> dict:
         if slippages:
             status["avg_slippage_bps"] = round(sum(slippages) / len(slippages), 2)
     status["last_fill_at"] = _iso(last_fill) if last_fill is not None else None
+    status["last_notify_at"] = _iso(last_notify) if last_notify else None
+    for msg in sorted(push_errors):
+        errors.append(f"push notification failing: {msg}")
+    for msg in sorted(config_warnings):
+        errors.append(f"config: {msg}")
     status["errors"] = errors
     return status
 

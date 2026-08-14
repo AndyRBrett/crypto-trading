@@ -56,6 +56,67 @@ def _hkdf_expand(prk: bytes, info: bytes, length: int) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# VAPID key handling
+# ---------------------------------------------------------------------------
+
+def derive_public_key(vapid_private_key: str) -> str:
+    """Return the base64url VAPID **public** key for a raw P-256 private scalar.
+
+    A push subscription is permanently bound to the ``applicationServerKey`` the
+    browser subscribed with. If the bot later signs with a different keypair the
+    push service rejects every message (``VapidPkHashMismatch``) — which is
+    exactly what a hardcoded public key in the dashboard invites the moment the
+    private key is rotated. Deriving the public half from the private key we
+    actually sign with lets the dashboard publish the matching value, so the two
+    halves cannot drift apart. Returns "" if the key is absent or malformed.
+    """
+    if not vapid_private_key:
+        return ""
+    try:
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        d = int.from_bytes(_b64d(vapid_private_key.strip()), "big")
+        priv = ec.derive_private_key(d, ec.SECP256R1(), default_backend())
+        return _b64e(
+            priv.public_key().public_bytes(
+                serialization.Encoding.X962,
+                serialization.PublicFormat.UncompressedPoint,
+            )
+        )
+    except Exception as exc:
+        log.error("VAPID_PRIVATE_KEY is not a valid base64url P-256 scalar: %s", exc)
+        return ""
+
+
+def _explain_failure(status_code: int, body: str) -> str:
+    """Turn a push-service rejection into an instruction the user can act on."""
+    detail = f"HTTP {status_code}: {body[:200]}"
+    if "VapidPkHashMismatch" in body or status_code == 403:
+        return (
+            f"{detail}\n"
+            "  -> The PUSH_SUBSCRIPTION secret was created with a DIFFERENT VAPID key "
+            "than VAPID_PRIVATE_KEY signs with.\n"
+            "     A subscription is bound to the key it was created with, so rotating "
+            "VAPID_PRIVATE_KEY invalidates every existing subscription.\n"
+            "     Fix: open the dashboard, click the bell to re-subscribe, and replace "
+            "the PUSH_SUBSCRIPTION secret with the new JSON."
+        )
+    if status_code in (404, 410):
+        return (
+            f"{detail}\n"
+            "  -> The subscription has expired or was revoked by the browser.\n"
+            "     Fix: re-subscribe from the dashboard and replace PUSH_SUBSCRIPTION."
+        )
+    if status_code == 413:
+        return f"{detail}\n  -> Payload too large for the push service."
+    if status_code == 429:
+        return f"{detail}\n  -> Rate limited by the push service; it should recover on its own."
+    return detail
+
+
+# ---------------------------------------------------------------------------
 # RFC 8291 — message encryption for Web Push
 # ---------------------------------------------------------------------------
 
@@ -158,6 +219,9 @@ class Notifier:
         self._subscription: dict | None = None
         self._private_key = vapid_private_key.strip()
         self._contact = claims_email.strip() or "mailto:bot@example.com"
+        # Last delivery failure, surfaced by callers so a dead push channel is
+        # visible instead of being swallowed into a log nobody reads.
+        self.last_error: str = ""
 
         if push_subscription:
             try:
@@ -166,16 +230,27 @@ class Notifier:
                 log.warning("PUSH_SUBSCRIPTION is not valid JSON — notifications disabled")
                 self.enabled = False
 
+    @property
+    def public_key(self) -> str:
+        """The VAPID public key matching the private key we sign with."""
+        return derive_public_key(self._private_key)
+
     def send(
         self,
         title: str,
         message: str,
         tags: str = "",
         priority: str = "default",
-    ) -> None:
-        """Send an encrypted Web Push message. Swallows all errors."""
+    ) -> bool:
+        """Send an encrypted Web Push message.
+
+        Returns True only when the push service actually accepted the message.
+        Never raises — a broken notifier must not stop the bot trading — but the
+        failure is recorded in :attr:`last_error` and logged at ERROR so it can
+        be surfaced rather than silently discarded.
+        """
         if not self.enabled or self._subscription is None:
-            return
+            return False
         try:
             import requests as _requests
 
@@ -199,7 +274,12 @@ class Notifier:
             resp = _requests.post(endpoint, data=body, headers=headers, timeout=15)
             if resp.status_code in (200, 201, 202):
                 log.info("Push notification sent: %s", title)
-            else:
-                log.warning("Push returned HTTP %d: %s", resp.status_code, resp.text[:200])
+                self.last_error = ""
+                return True
+            self.last_error = _explain_failure(resp.status_code, resp.text)
+            log.error("Push notification REJECTED (%r)\n%s", title, self.last_error)
+            return False
         except Exception as exc:
-            log.warning("Push notification failed: %s", exc)
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            log.error("Push notification failed (%r): %s", title, self.last_error)
+            return False
