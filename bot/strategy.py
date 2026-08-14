@@ -254,7 +254,13 @@ class Strategy:
             reasons.append(
                 f"RSI {rsi_val:.1f} is overbought (>= {c.rsi_overbought:.0f}) — taking profit."
             )
-            strength = min(1.0, (rsi_val - c.rsi_overbought) / (100 - c.rsi_overbought))
+            # rsi_overbought=100 is the documented way to disable this exit, but
+            # RSI reaches exactly 100 on a monotonic run — and then this divided
+            # by zero and took the whole tick down. Reachable in live trading,
+            # not just in a sweep: any config that disables the RSI exit crashes
+            # the first time an asset trends without a down bar.
+            headroom = 100 - c.rsi_overbought
+            strength = 1.0 if headroom <= 0 else min(1.0, (rsi_val - c.rsi_overbought) / headroom)
         else:
             trend_word = "above" if fast > slow else "below"
             reasons.append(

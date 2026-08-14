@@ -126,3 +126,21 @@ def test_thresholds_omit_filters_that_are_off():
     sig = s.generate_signal("BTC-USD", candles([10, 11, 10, 11, 10, 11]))
     assert "price_to_trend_pct" not in sig.thresholds
     assert "adx_to_min" not in sig.thresholds
+
+
+def test_rsi_overbought_at_100_does_not_divide_by_zero():
+    """rsi_overbought=100 disables the RSI exit, but RSI hits exactly 100 on a
+    monotonic run — which used to crash the tick with ZeroDivisionError. Found
+    while building the walk-forward harness; reachable in live trading by any
+    config that disables the RSI exit.
+    """
+    from bot.strategy import Strategy, StrategyConfig
+
+    cfg = StrategyConfig(fast_period=5, slow_period=20, rsi_overbought=100,
+                         trend_filter=False, adx_filter=False)
+    strat = Strategy(cfg)
+    # Strictly rising closes → RSI saturates at 100.
+    candles = [{"time": 1700000000 + i * 3600, "open": 100 + i, "high": 101 + i,
+                "low": 99 + i, "close": 100 + i} for i in range(120)]
+    signal = strat.generate_signal("BTC-USD", candles)   # must not raise
+    assert 0.0 <= signal.strength <= 1.0
