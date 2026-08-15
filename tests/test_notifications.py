@@ -170,6 +170,10 @@ accounts:
     )
     cfg = Config.load(str(p))
     cfg.dashboard_state_path = str(tmp_path / "state.json")
+    # Keep each account's SQLite store inside tmp_path; the default resolves
+    # relative to the CWD, so Runners would resume state left by earlier tests.
+    for acct in cfg.accounts:
+        acct.db_path = str(tmp_path / f"trading.{acct.name}.db")
     for k, v in extra.items():
         setattr(cfg, k, v)
     runner = Runner(cfg, market_data=StubMarketData())
@@ -207,16 +211,18 @@ def test_heartbeat_fires_after_a_long_silence(tmp_path):
 
 
 def _quiet_runner_with_open_position(tmp_path):
-    """Tick once so an account holds a position and last_prices is populated,
-    then re-arm the heartbeat clock. The heartbeat is driven directly afterwards
-    so the summary is what's under test, not whatever the strategy does next."""
+    """Put one account into a known state directly and re-arm the heartbeat clock.
+
+    Deliberately does NOT tick: an earlier version relied on the strategy leaving
+    a position open after one tick against synthetic candles, which made these
+    tests hostage to unrelated strategy changes (they broke when main retuned the
+    RSI exit). What's under test is how the heartbeat *renders* a book, so the
+    book is constructed rather than traded into.
+    """
     runner = _runner(tmp_path, heartbeat_days=7)
-    runner.tick()
     eng = runner.engines[0][1]
-    assert any(p.quantity != 0 for p in eng.portfolio.positions.values()), (
-        "fixture expects the first tick to leave an open position"
-    )
-    runner.notifier.sent.clear()
+    eng.last_prices = {"BTC-USD": 110.0}
+    eng.portfolio.execute(BUY, "BTC-USD", 100.0, 1.0)
     eng.storage.set_meta("last_notify_at", str(time.time() - 9 * 86_400))
     return runner, eng
 

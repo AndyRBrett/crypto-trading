@@ -67,7 +67,21 @@ accounts:
     )
     cfg = Config.load(str(p))
     cfg.dashboard_state_path = str(tmp_path / "state.json")
+    _isolate_dbs(cfg, tmp_path)
     return cfg
+
+
+def _isolate_dbs(cfg, tmp_path):
+    """Point every account's SQLite store inside tmp_path.
+
+    Without this the accounts resolve to ``trading.<name>.db`` relative to the
+    CWD, so tests write into the repo root and each Runner resumes whatever the
+    previous test (or a previous local run) left behind. That leaked state is
+    invisible until a test asserts on the portfolio — it passed locally off a
+    stale DB and failed on CI's fresh checkout.
+    """
+    for acct in cfg.accounts:
+        acct.db_path = str(tmp_path / f"trading.{acct.name}.db")
 
 
 def test_runner_ticks_all_and_dedupes_candles(tmp_path):
@@ -125,6 +139,7 @@ def test_default_account_has_no_notification_prefix(tmp_path):
     p.write_text("products: [BTC-USD]\nsentiment_enabled: false\n")
     cfg = Config.load(str(p))
     cfg.dashboard_state_path = str(tmp_path / "state.json")
+    _isolate_dbs(cfg, tmp_path)
     runner = Runner(cfg, market_data=CountingMarketData())
     eng = runner.engines[0][1]
     assert eng._notif_prefix() == ""
