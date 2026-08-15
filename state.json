@@ -1,6 +1,6 @@
 {
   "schema": "multi-account-v1",
-  "updated_at": 1786813837.7689977,
+  "updated_at": 1786817492.0902157,
   "granularity": "ONE_DAY",
   "products": [
     "BTC-USD",
@@ -8,9 +8,9 @@
     "SOL-USD"
   ],
   "prices": {
-    "BTC-USD": 63025.01,
-    "ETH-USD": 1883.42,
-    "SOL-USD": 75.48
+    "BTC-USD": 63029.08,
+    "ETH-USD": 1883.24,
+    "SOL-USD": 75.55
   },
   "price_history": {
     "BTC-USD": [
@@ -852,7 +852,7 @@
         "o": 62975.18,
         "h": 63123.68,
         "l": 62830.01,
-        "c": 63025.01
+        "c": 63029.08
       }
     ],
     "ETH-USD": [
@@ -1694,7 +1694,7 @@
         "o": 1880.41,
         "h": 1884.88,
         "l": 1873.77,
-        "c": 1883.42
+        "c": 1883.24
       }
     ],
     "SOL-USD": [
@@ -2536,23 +2536,23 @@
         "o": 75.32,
         "h": 75.64,
         "l": 74.96,
-        "c": 75.48
+        "c": 75.55
       }
     ]
   },
   "portfolio_total": {
     "starting_cash": 50000,
     "cash": 50535.29262079949,
-    "market_value": -1300.543319946492,
-    "equity": 49234.74930085299,
+    "market_value": -1300.4190259506809,
+    "equity": 49234.8735948488,
     "realized_pnl": -793.3656557383564,
-    "unrealized_pnl": 28.114956591350307,
-    "total_return_pct": -1.5305013982940152,
+    "unrealized_pnl": 28.239250587161358,
+    "total_return_pct": -1.5302528103023905,
     "gross_long": 0.0,
-    "gross_short": 1300.543319946492,
-    "net_exposure": -1300.543319946492,
+    "gross_short": 1300.4190259506809,
+    "net_exposure": -1300.4190259506809,
     "exposure_by_asset": {
-      "ETH-USD": -1300.54
+      "ETH-USD": -1300.42
     }
   },
   "accounts": [
@@ -2585,7 +2585,7 @@
       "latest_signals": {
         "BTC-USD": {
           "action": "HOLD",
-          "price": 63025.01,
+          "price": 63029.08,
           "strength": 0.0,
           "reasons": [
             "No crossover. Fast MA below slow MA; RSI 42.8 is neutral.",
@@ -2610,7 +2610,7 @@
           "sentiment": {
             "score": -0.15,
             "label": "neutral",
-            "summary": "Institutional adoption signals (UBS, Paul Tudor Jones, Israeli bank) are offset by near-term price weakness, ETF outflows, MSCI index-exclusion threats, and skeptical long-term price forecasts, leaving sentiment slightly cautious.",
+            "summary": "Institutional adoption signals from UBS, Paul Tudor Jones and Israeli banks provide support, but near-term price weakness, ETF outflows, MSCI index-exclusion threats and skeptical price forecasts create offsetting headwinds.",
             "headline_count": 15,
             "headlines": [
               "Swiss mega-bank UBS ramps up its Bitcoin exposure with a massive 24-fold surge in ETF call options",
@@ -2623,7 +2623,7 @@
         },
         "ETH-USD": {
           "action": "HOLD",
-          "price": 1883.42,
+          "price": 1883.24,
           "strength": 0.0,
           "reasons": [
             "Fast MA above slow, but price $1,880.41 is below trend MA(200) $2,165.80 \u2014 counter-trend, skipping the buy.",
@@ -2648,7 +2648,7 @@
           "sentiment": {
             "score": 0.35,
             "label": "bullish",
-            "summary": "Institutional adoption is the dominant narrative with major banks like Israel's largest bank and JPMorgan boosting Ether exposure alongside growing staking and DeFi activity, though regulatory uncertainty and falling prices temper the outlook.",
+            "summary": "Institutional adoption is the dominant narrative, with major banks (Israel's largest bank, JPMorgan, Morgan Stanley) increasing crypto/ETH exposure and growing DeFi and staking activity, though regulatory uncertainty and some price weakness temper the outlook.",
             "headline_count": 15,
             "headlines": [
               "Wall Street's private blockchain obsession is a 'race to the bottom,' Ethereum advocate Raman warns",
@@ -2661,6 +2661,76 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1786817489.0060985,
+          "product_id": "ETH-USD",
+          "action": "HOLD",
+          "price": 1883.24,
+          "reason": "Fast MA above slow, but price $1,880.41 is below trend MA(200) $2,165.80 \u2014 counter-trend, skipping the buy.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 1882.5,
+              "slow_sma": 1863.98,
+              "prev_fast_sma": 1882.72,
+              "prev_slow_sma": 1863.31,
+              "rsi": 50.95,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 2165.8,
+              "atr": 52.07,
+              "adx": 15.69,
+              "sentiment_score": 0.35,
+              "sentiment_label": "bullish"
+            },
+            "thresholds": {
+              "ma_gap_pct": 0.994,
+              "rsi_to_overbought": 34.05,
+              "price_to_trend_pct": -13.177,
+              "adx_to_min": -4.31
+            },
+            "strength": 0.0
+          }
+        },
+        {
+          "timestamp": 1786817485.661592,
+          "product_id": "BTC-USD",
+          "action": "HOLD",
+          "price": 63029.08,
+          "reason": "No crossover. Fast MA below slow MA; RSI 42.8 is neutral.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 63914.19,
+              "slow_sma": 64409.6,
+              "prev_fast_sma": 64013.03,
+              "prev_slow_sma": 64468.15,
+              "rsi": 42.79,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 72235.76,
+              "atr": 1349.59,
+              "adx": 12.74,
+              "sentiment_score": -0.15,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "ma_gap_pct": -0.769,
+              "rsi_to_overbought": 42.21,
+              "price_to_trend_pct": -12.82,
+              "adx_to_min": -7.26
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1786813835.1161408,
           "product_id": "ETH-USD",
@@ -4690,85 +4760,9 @@
             },
             "strength": 0.0
           }
-        },
-        {
-          "timestamp": 1786704365.4663465,
-          "product_id": "ETH-USD",
-          "action": "HOLD",
-          "price": 1874.38,
-          "reason": "Fast MA above slow, but price $1,884.61 is below trend MA(200) $2,170.34 \u2014 counter-trend, skipping the buy.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 1882.72,
-              "slow_sma": 1863.31,
-              "prev_fast_sma": 1882.52,
-              "prev_slow_sma": 1862.44,
-              "rsi": 51.71,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 2170.34,
-              "atr": 53.96,
-              "adx": 16.23,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "ma_gap_pct": 1.042,
-              "rsi_to_overbought": 33.29,
-              "price_to_trend_pct": -13.165,
-              "adx_to_min": -3.77
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1786704365.4615808,
-          "product_id": "BTC-USD",
-          "action": "HOLD",
-          "price": 62814.78,
-          "reason": "No crossover. Fast MA below slow MA; RSI 45.6 is neutral.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 64013.03,
-              "slow_sma": 64468.15,
-              "prev_fast_sma": 64074.89,
-              "prev_slow_sma": 64510.71,
-              "rsi": 45.6,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 72370.38,
-              "atr": 1369.31,
-              "adx": 11.95,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "ma_gap_pct": -0.706,
-              "rsi_to_overbought": 39.4,
-              "price_to_trend_pct": -12.36,
-              "adx_to_min": -8.05
-            },
-            "strength": 0.0
-          }
         }
       ],
       "equity_curve": [
-        {
-          "timestamp": 1783842937.234356,
-          "cash": 10000.0,
-          "market_value": 0.0,
-          "equity": 10000.0
-        },
         {
           "timestamp": 1783849289.4103003,
           "cash": 10000.0,
@@ -7762,6 +7756,12 @@
           "cash": 10000.0,
           "market_value": 0.0,
           "equity": 10000.0
+        },
+        {
+          "timestamp": 1786817489.0072744,
+          "cash": 10000.0,
+          "market_value": 0.0,
+          "equity": 10000.0
         }
       ],
       "trades": []
@@ -7795,7 +7795,7 @@
       "latest_signals": {
         "BTC-USD": {
           "action": "HOLD",
-          "price": 63025.01,
+          "price": 63029.08,
           "strength": 0.0,
           "reasons": [
             "RSI 42.8 is between 30 and 55 \u2014 no edge, holding.",
@@ -7811,7 +7811,7 @@
           "sentiment": {
             "score": -0.15,
             "label": "neutral",
-            "summary": "Institutional adoption signals (UBS, Paul Tudor Jones, Israeli bank) are offset by near-term price weakness, ETF outflows, MSCI index-exclusion threats, and skeptical long-term price forecasts, leaving sentiment slightly cautious.",
+            "summary": "Institutional adoption signals from UBS, Paul Tudor Jones and Israeli banks provide support, but near-term price weakness, ETF outflows, MSCI index-exclusion threats and skeptical price forecasts create offsetting headwinds.",
             "headline_count": 15,
             "headlines": [
               "Swiss mega-bank UBS ramps up its Bitcoin exposure with a massive 24-fold surge in ETF call options",
@@ -7824,24 +7824,24 @@
         },
         "SOL-USD": {
           "action": "HOLD",
-          "price": 75.48,
+          "price": 75.55,
           "strength": 0.0,
           "reasons": [
             "RSI 50.9 is between 30 and 55 \u2014 no edge, holding.",
-            "News sentiment bullish (+0.35)."
+            "News sentiment bullish (+0.42)."
           ],
           "indicators": {
             "rsi": 50.95,
             "rsi_period": 14,
             "atr": 2.23,
-            "sentiment_score": 0.35,
+            "sentiment_score": 0.42,
             "sentiment_label": "bullish"
           },
           "sentiment": {
-            "score": 0.35,
+            "score": 0.42,
             "label": "bullish",
-            "summary": "Solana benefits from institutional adoption via Israel's largest bank and Galaxy, a fee overhaul boosting burn, and optimistic 'everything chain' narratives, though falling prices and regulatory uncertainty temper the outlook.",
-            "headline_count": 8,
+            "summary": "Positive institutional adoption (Israeli bank trading, 'everything chain' narrative) and Solana's fee overhaul improving tokenomics outweigh mild bearish signals like falling prices and low CLARITY Act odds.",
+            "headline_count": 12,
             "headlines": [
               "Israel\u2019s largest bank to offer crypto trading with Galaxy",
               "Galaxy lowers CLARITY Act odds to 10%",
@@ -7853,6 +7853,54 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1786817491.9745188,
+          "product_id": "SOL-USD",
+          "action": "HOLD",
+          "price": 75.55,
+          "reason": "RSI 50.9 is between 30 and 55 \u2014 no edge, holding.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "rsi": 50.95,
+              "rsi_period": 14,
+              "atr": 2.23,
+              "sentiment_score": 0.42,
+              "sentiment_label": "bullish"
+            },
+            "thresholds": {
+              "rsi_to_oversold": 20.95,
+              "rsi_to_overbought": 4.05
+            },
+            "strength": 0.0
+          }
+        },
+        {
+          "timestamp": 1786817489.215947,
+          "product_id": "BTC-USD",
+          "action": "HOLD",
+          "price": 63029.08,
+          "reason": "RSI 42.8 is between 30 and 55 \u2014 no edge, holding.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "rsi": 42.79,
+              "rsi_period": 14,
+              "atr": 1349.59,
+              "sentiment_score": -0.15,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "rsi_to_oversold": 12.79,
+              "rsi_to_overbought": 12.21
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1786813837.6362498,
           "product_id": "SOL-USD",
@@ -9244,63 +9292,9 @@
             },
             "strength": 0.0
           }
-        },
-        {
-          "timestamp": 1786704365.63683,
-          "product_id": "SOL-USD",
-          "action": "HOLD",
-          "price": 75.41,
-          "reason": "RSI 54.6 is between 30 and 55 \u2014 no edge, holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "rsi": 54.64,
-              "rsi_period": 14,
-              "atr": 2.27,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "rsi_to_oversold": 24.64,
-              "rsi_to_overbought": 0.36
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1786704365.6339965,
-          "product_id": "BTC-USD",
-          "action": "HOLD",
-          "price": 62814.78,
-          "reason": "RSI 45.6 is between 30 and 55 \u2014 no edge, holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "rsi": 45.6,
-              "rsi_period": 14,
-              "atr": 1369.31,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "rsi_to_oversold": 15.6,
-              "rsi_to_overbought": 9.4
-            },
-            "strength": 0.0
-          }
         }
       ],
       "equity_curve": [
-        {
-          "timestamp": 1783842937.3887045,
-          "cash": 10000.0,
-          "market_value": 0.0,
-          "equity": 10000.0
-        },
         {
           "timestamp": 1783849289.5330124,
           "cash": 10000.0,
@@ -12294,6 +12288,12 @@
           "cash": 10000.0,
           "market_value": 0.0,
           "equity": 10000.0
+        },
+        {
+          "timestamp": 1786817491.9758966,
+          "cash": 10000.0,
+          "market_value": 0.0,
+          "equity": 10000.0
         }
       ],
       "trades": []
@@ -12327,7 +12327,7 @@
       "latest_signals": {
         "ETH-USD": {
           "action": "HOLD",
-          "price": 1883.42,
+          "price": 1883.24,
           "strength": 0.0,
           "reasons": [
             "Price $1,880.41 inside the channel ($1,846.73 \u2013 $1,979.00) \u2014 holding.",
@@ -12344,7 +12344,7 @@
           "sentiment": {
             "score": 0.35,
             "label": "bullish",
-            "summary": "Institutional adoption is the dominant narrative with major banks like Israel's largest bank and JPMorgan boosting Ether exposure alongside growing staking and DeFi activity, though regulatory uncertainty and falling prices temper the outlook.",
+            "summary": "Institutional adoption is the dominant narrative, with major banks (Israel's largest bank, JPMorgan, Morgan Stanley) increasing crypto/ETH exposure and growing DeFi and staking activity, though regulatory uncertainty and some price weakness temper the outlook.",
             "headline_count": 15,
             "headlines": [
               "Wall Street's private blockchain obsession is a 'race to the bottom,' Ethereum advocate Raman warns",
@@ -12357,25 +12357,25 @@
         },
         "SOL-USD": {
           "action": "HOLD",
-          "price": 75.48,
+          "price": 75.55,
           "strength": 0.0,
           "reasons": [
             "Price $75.33 inside the channel ($72.28 \u2013 $77.75) \u2014 holding.",
-            "News sentiment bullish (+0.35)."
+            "News sentiment bullish (+0.42)."
           ],
           "indicators": {
             "donchian_upper": 77.75,
             "donchian_lower": 72.28,
             "donchian_period": 20,
             "atr": 2.23,
-            "sentiment_score": 0.35,
+            "sentiment_score": 0.42,
             "sentiment_label": "bullish"
           },
           "sentiment": {
-            "score": 0.35,
+            "score": 0.42,
             "label": "bullish",
-            "summary": "Solana benefits from institutional adoption via Israel's largest bank and Galaxy, a fee overhaul boosting burn, and optimistic 'everything chain' narratives, though falling prices and regulatory uncertainty temper the outlook.",
-            "headline_count": 8,
+            "summary": "Positive institutional adoption (Israeli bank trading, 'everything chain' narrative) and Solana's fee overhaul improving tokenomics outweigh mild bearish signals like falling prices and low CLARITY Act odds.",
+            "headline_count": 12,
             "headlines": [
               "Israel\u2019s largest bank to offer crypto trading with Galaxy",
               "Galaxy lowers CLARITY Act odds to 10%",
@@ -12387,6 +12387,56 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1786817491.9869916,
+          "product_id": "SOL-USD",
+          "action": "HOLD",
+          "price": 75.55,
+          "reason": "Price $75.33 inside the channel ($72.28 \u2013 $77.75) \u2014 holding.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "donchian_upper": 77.75,
+              "donchian_lower": 72.28,
+              "donchian_period": 20,
+              "atr": 2.23,
+              "sentiment_score": 0.42,
+              "sentiment_label": "bullish"
+            },
+            "thresholds": {
+              "breakout_dist_pct": -3.113,
+              "exit_dist_pct": 4.22
+            },
+            "strength": 0.0
+          }
+        },
+        {
+          "timestamp": 1786817491.9847267,
+          "product_id": "ETH-USD",
+          "action": "HOLD",
+          "price": 1883.24,
+          "reason": "Price $1,880.41 inside the channel ($1,846.73 \u2013 $1,979.00) \u2014 holding.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "donchian_upper": 1979.0,
+              "donchian_lower": 1846.73,
+              "donchian_period": 20,
+              "atr": 52.07,
+              "sentiment_score": 0.35,
+              "sentiment_label": "bullish"
+            },
+            "thresholds": {
+              "breakout_dist_pct": -4.982,
+              "exit_dist_pct": 1.824
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1786813837.6494584,
           "product_id": "SOL-USD",
@@ -13836,65 +13886,9 @@
             },
             "strength": 0.0
           }
-        },
-        {
-          "timestamp": 1786704365.6488533,
-          "product_id": "SOL-USD",
-          "action": "HOLD",
-          "price": 75.41,
-          "reason": "Price $76.21 inside the channel ($71.88 \u2013 $77.75) \u2014 holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "donchian_upper": 77.75,
-              "donchian_lower": 71.88,
-              "donchian_period": 20,
-              "atr": 2.27,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "breakout_dist_pct": -1.981,
-              "exit_dist_pct": 6.024
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1786704365.6463094,
-          "product_id": "ETH-USD",
-          "action": "HOLD",
-          "price": 1874.38,
-          "reason": "Price $1,884.61 inside the channel ($1,826.31 \u2013 $1,979.00) \u2014 holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "donchian_upper": 1979.0,
-              "donchian_lower": 1826.31,
-              "donchian_period": 20,
-              "atr": 53.96,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "breakout_dist_pct": -4.77,
-              "exit_dist_pct": 3.192
-            },
-            "strength": 0.0
-          }
         }
       ],
       "equity_curve": [
-        {
-          "timestamp": 1783842937.398411,
-          "cash": 9443.362942742793,
-          "market_value": 0.0,
-          "equity": 9443.362942742793
-        },
         {
           "timestamp": 1783849289.5416062,
           "cash": 9443.362942742793,
@@ -16888,6 +16882,12 @@
           "cash": 9399.2866788729,
           "market_value": 0.0,
           "equity": 9399.2866788729
+        },
+        {
+          "timestamp": 1786817491.9880028,
+          "cash": 9399.2866788729,
+          "market_value": 0.0,
+          "equity": 9399.2866788729
         }
       ],
       "trades": [
@@ -17262,11 +17262,11 @@
       ],
       "starting_cash": 10000,
       "cash": 11136.005941926585,
-      "market_value": -1300.543319946492,
-      "equity": 9835.462621980094,
-      "total_return_pct": -1.6453737801990664,
+      "market_value": -1300.4190259506809,
+      "equity": 9835.586915975904,
+      "total_return_pct": -1.644130840240965,
       "realized_pnl": -192.6523346112568,
-      "unrealized_pnl": 28.114956591350307,
+      "unrealized_pnl": 28.239250587161358,
       "stats": {
         "fills": 9,
         "round_trips": 4,
@@ -17284,15 +17284,15 @@
           "quantity": -0.690522198950044,
           "side": "short",
           "avg_price": 1935.7499999999998,
-          "price": 1883.42,
-          "value": -1300.543319946492,
-          "unrealized_pnl": 36.13502667105559
+          "price": 1883.24,
+          "value": -1300.4190259506809,
+          "unrealized_pnl": 36.25932066686664
         }
       ],
       "latest_signals": {
         "BTC-USD": {
           "action": "HOLD",
-          "price": 63025.01,
+          "price": 63029.08,
           "strength": 0.0,
           "reasons": [
             "No qualifying trend. Fast MA below slow MA; RSI 42.8; waiting for a confirmed trend with the long-term MA.",
@@ -17317,7 +17317,7 @@
           "sentiment": {
             "score": -0.15,
             "label": "neutral",
-            "summary": "Institutional adoption signals (UBS, Paul Tudor Jones, Israeli bank) are offset by near-term price weakness, ETF outflows, MSCI index-exclusion threats, and skeptical long-term price forecasts, leaving sentiment slightly cautious.",
+            "summary": "Institutional adoption signals from UBS, Paul Tudor Jones and Israeli banks provide support, but near-term price weakness, ETF outflows, MSCI index-exclusion threats and skeptical price forecasts create offsetting headwinds.",
             "headline_count": 15,
             "headlines": [
               "Swiss mega-bank UBS ramps up its Bitcoin exposure with a massive 24-fold surge in ETF call options",
@@ -17330,7 +17330,7 @@
         },
         "ETH-USD": {
           "action": "HOLD",
-          "price": 1883.42,
+          "price": 1883.24,
           "strength": 0.0,
           "reasons": [
             "No qualifying trend. Fast MA above slow MA; RSI 51.0; waiting for a confirmed trend with the long-term MA.",
@@ -17355,7 +17355,7 @@
           "sentiment": {
             "score": 0.35,
             "label": "bullish",
-            "summary": "Institutional adoption is the dominant narrative with major banks like Israel's largest bank and JPMorgan boosting Ether exposure alongside growing staking and DeFi activity, though regulatory uncertainty and falling prices temper the outlook.",
+            "summary": "Institutional adoption is the dominant narrative, with major banks (Israel's largest bank, JPMorgan, Morgan Stanley) increasing crypto/ETH exposure and growing DeFi and staking activity, though regulatory uncertainty and some price weakness temper the outlook.",
             "headline_count": 15,
             "headlines": [
               "Wall Street's private blockchain obsession is a 'race to the bottom,' Ethereum advocate Raman warns",
@@ -17368,6 +17368,78 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1786817492.0013583,
+          "product_id": "ETH-USD",
+          "action": "HOLD",
+          "price": 1883.24,
+          "reason": "No qualifying trend. Fast MA above slow MA; RSI 51.0; waiting for a confirmed trend with the long-term MA.",
+          "outcome": "hold",
+          "reject_code": "in_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 1882.5,
+              "slow_sma": 1863.98,
+              "prev_fast_sma": 1882.72,
+              "prev_slow_sma": 1863.31,
+              "rsi": 50.95,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 2165.8,
+              "atr": 52.07,
+              "adx": 15.69,
+              "sentiment_score": 0.35,
+              "sentiment_label": "bullish"
+            },
+            "thresholds": {
+              "ma_gap_pct": 0.994,
+              "rsi_to_overbought": 34.05,
+              "rsi_to_oversold": 35.95,
+              "price_to_trend_pct": -13.177,
+              "adx_to_min": -4.31
+            },
+            "strength": 0.0
+          }
+        },
+        {
+          "timestamp": 1786817491.9985242,
+          "product_id": "BTC-USD",
+          "action": "HOLD",
+          "price": 63029.08,
+          "reason": "No qualifying trend. Fast MA below slow MA; RSI 42.8; waiting for a confirmed trend with the long-term MA.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 63914.19,
+              "slow_sma": 64409.6,
+              "prev_fast_sma": 64013.03,
+              "prev_slow_sma": 64468.15,
+              "rsi": 42.79,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 72235.76,
+              "atr": 1349.59,
+              "adx": 12.74,
+              "sentiment_score": -0.15,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "ma_gap_pct": -0.769,
+              "rsi_to_overbought": 42.21,
+              "rsi_to_oversold": 27.79,
+              "price_to_trend_pct": -12.82,
+              "adx_to_min": -7.26
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1786813837.6649053,
           "product_id": "ETH-USD",
@@ -19425,78 +19497,6 @@
           "product_id": "BTC-USD",
           "action": "HOLD",
           "price": 62830.0,
-          "reason": "No qualifying trend. Fast MA below slow MA; RSI 45.6; waiting for a confirmed trend with the long-term MA.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 64013.03,
-              "slow_sma": 64468.15,
-              "prev_fast_sma": 64074.89,
-              "prev_slow_sma": 64510.71,
-              "rsi": 45.6,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 72370.38,
-              "atr": 1369.31,
-              "adx": 11.95,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "ma_gap_pct": -0.706,
-              "rsi_to_overbought": 39.4,
-              "rsi_to_oversold": 30.6,
-              "price_to_trend_pct": -12.36,
-              "adx_to_min": -8.05
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1786704365.6638427,
-          "product_id": "ETH-USD",
-          "action": "HOLD",
-          "price": 1874.38,
-          "reason": "No qualifying trend. Fast MA above slow MA; RSI 51.7; waiting for a confirmed trend with the long-term MA.",
-          "outcome": "hold",
-          "reject_code": "in_position",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 1882.72,
-              "slow_sma": 1863.31,
-              "prev_fast_sma": 1882.52,
-              "prev_slow_sma": 1862.44,
-              "rsi": 51.71,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 2170.34,
-              "atr": 53.96,
-              "adx": 16.23,
-              "sentiment_score": 0.0,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "ma_gap_pct": 1.042,
-              "rsi_to_overbought": 33.29,
-              "rsi_to_oversold": 36.71,
-              "price_to_trend_pct": -13.165,
-              "adx_to_min": -3.77
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1786704365.6604333,
-          "product_id": "BTC-USD",
-          "action": "HOLD",
-          "price": 62814.78,
           "reason": "No qualifying trend. Fast MA below slow MA; RSI 45.6; waiting for a confirmed trend with the long-term MA.",
           "outcome": "hold",
           "reject_code": "no_signal",
@@ -22475,6 +22475,12 @@
           "cash": 11136.005941926585,
           "market_value": -1300.543319946492,
           "equity": 9835.462621980094
+        },
+        {
+          "timestamp": 1786817492.0023327,
+          "cash": 11136.005941926585,
+          "market_value": -1300.4190259506809,
+          "equity": 9835.586915975904
         }
       ],
       "trades": [
@@ -22794,7 +22800,7 @@
       "latest_signals": {
         "BTC-USD": {
           "action": "SELL",
-          "price": 63025.01,
+          "price": 63029.08,
           "strength": 1.0,
           "reasons": [
             "Price $62,975.19 broke below the 200-period trend MA $72,235.76 \u2014 regime break, moving to cash."
@@ -22807,7 +22813,7 @@
           "sentiment": {
             "score": -0.15,
             "label": "neutral",
-            "summary": "Institutional adoption signals (UBS, Paul Tudor Jones, Israeli bank) are offset by near-term price weakness, ETF outflows, MSCI index-exclusion threats, and skeptical long-term price forecasts, leaving sentiment slightly cautious.",
+            "summary": "Institutional adoption signals from UBS, Paul Tudor Jones and Israeli banks provide support, but near-term price weakness, ETF outflows, MSCI index-exclusion threats and skeptical price forecasts create offsetting headwinds.",
             "headline_count": 15,
             "headlines": [
               "Swiss mega-bank UBS ramps up its Bitcoin exposure with a massive 24-fold surge in ETF call options",
@@ -22820,7 +22826,7 @@
         },
         "ETH-USD": {
           "action": "SELL",
-          "price": 1883.42,
+          "price": 1883.24,
           "strength": 1.0,
           "reasons": [
             "Price $1,880.41 broke below the 200-period trend MA $2,165.80 \u2014 regime break, moving to cash."
@@ -22833,7 +22839,7 @@
           "sentiment": {
             "score": 0.35,
             "label": "bullish",
-            "summary": "Institutional adoption is the dominant narrative with major banks like Israel's largest bank and JPMorgan boosting Ether exposure alongside growing staking and DeFi activity, though regulatory uncertainty and falling prices temper the outlook.",
+            "summary": "Institutional adoption is the dominant narrative, with major banks (Israel's largest bank, JPMorgan, Morgan Stanley) increasing crypto/ETH exposure and growing DeFi and staking activity, though regulatory uncertainty and some price weakness temper the outlook.",
             "headline_count": 15,
             "headlines": [
               "Wall Street's private blockchain obsession is a 'race to the bottom,' Ethereum advocate Raman warns",
@@ -22846,6 +22852,48 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1786817492.016239,
+          "product_id": "ETH-USD",
+          "action": "SELL",
+          "price": 1883.24,
+          "reason": "Price $1,880.41 broke below the 200-period trend MA $2,165.80 \u2014 regime break, moving to cash.",
+          "outcome": "hold",
+          "reject_code": "no_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "trend_ma": 2165.8,
+              "trend_period": 200,
+              "atr": 52.07
+            },
+            "thresholds": {
+              "price_to_trend_pct": -13.177
+            },
+            "strength": 1.0
+          }
+        },
+        {
+          "timestamp": 1786817492.012726,
+          "product_id": "BTC-USD",
+          "action": "SELL",
+          "price": 63029.08,
+          "reason": "Price $62,975.19 broke below the 200-period trend MA $72,235.76 \u2014 regime break, moving to cash.",
+          "outcome": "hold",
+          "reject_code": "no_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "trend_ma": 72235.76,
+              "trend_period": 200,
+              "atr": 1349.59
+            },
+            "thresholds": {
+              "price_to_trend_pct": -12.82
+            },
+            "strength": 1.0
+          }
+        },
         {
           "timestamp": 1786813837.6785905,
           "product_id": "ETH-USD",
@@ -24063,57 +24111,9 @@
             },
             "strength": 1.0
           }
-        },
-        {
-          "timestamp": 1786704365.6777375,
-          "product_id": "ETH-USD",
-          "action": "SELL",
-          "price": 1874.38,
-          "reason": "Price $1,884.61 broke below the 200-period trend MA $2,170.34 \u2014 regime break, moving to cash.",
-          "outcome": "hold",
-          "reject_code": "no_position",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "trend_ma": 2170.34,
-              "trend_period": 200,
-              "atr": 53.96
-            },
-            "thresholds": {
-              "price_to_trend_pct": -13.165
-            },
-            "strength": 1.0
-          }
-        },
-        {
-          "timestamp": 1786704365.6748412,
-          "product_id": "BTC-USD",
-          "action": "SELL",
-          "price": 62814.78,
-          "reason": "Price $63,425.35 broke below the 200-period trend MA $72,370.38 \u2014 regime break, moving to cash.",
-          "outcome": "hold",
-          "reject_code": "no_position",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "trend_ma": 72370.38,
-              "trend_period": 200,
-              "atr": 1369.31
-            },
-            "thresholds": {
-              "price_to_trend_pct": -12.36
-            },
-            "strength": 1.0
-          }
         }
       ],
       "equity_curve": [
-        {
-          "timestamp": 1783842937.422344,
-          "cash": 10000.0,
-          "market_value": 0.0,
-          "equity": 10000.0
-        },
         {
           "timestamp": 1783849289.5648994,
           "cash": 10000.0,
@@ -27104,6 +27104,12 @@
         },
         {
           "timestamp": 1786813837.6792812,
+          "cash": 10000.0,
+          "market_value": 0.0,
+          "equity": 10000.0
+        },
+        {
+          "timestamp": 1786817492.017144,
           "cash": 10000.0,
           "market_value": 0.0,
           "equity": 10000.0
