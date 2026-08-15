@@ -464,6 +464,30 @@ class Engine:
         name = getattr(self.config, "account_name", "")
         return f"[{name}] " if name and name != "default" else ""
 
+    def _notify(self, title: str, message: str, tags: str = "", priority: str = "default") -> bool:
+        """Send a push and persist the outcome.
+
+        ``last_notify_at`` is what the Runner's heartbeat measures silence
+        against, and ``last_push_error`` is what surfaces a dead push channel in
+        overseer-status.json — without them a rejected push is invisible.
+        """
+        if not self.notifier.enabled:
+            return False
+        ok = self.notifier.send(title=title, message=message, tags=tags, priority=priority)
+        if ok:
+            self.storage.set_meta("last_notify_at", str(time.time()))
+            self.storage.set_meta("last_push_error", "")
+        else:
+            self.storage.set_meta("last_push_error", self.notifier.last_error)
+        return ok
+
+    def last_notify_at(self) -> float:
+        raw = self.storage.get_meta("last_notify_at")
+        try:
+            return float(raw) if raw else 0.0
+        except ValueError:
+            return 0.0
+
     def _finalize(self, trade, price):
         trade.explanation = self.explainer.explain(
             trade, self.portfolio, {trade.product_id: price}
@@ -471,21 +495,30 @@ class Engine:
         self.storage.save_trade(trade)
         log.info("EXECUTED %s | %s", trade.side, trade.explanation)
         # Realized P&L is non-zero only on a closing leg — a SELL closing a long
-        # or a BUY covering a short — so this fires on either kind of win.
-        if trade.realized_pnl > 0:
-            notional = trade.price * trade.quantity
-            pct = (trade.realized_pnl / notional) * 100 if notional > 0 else 0
-            verb = "Covered" if trade.side == BUY else "Sold"
-            self.notifier.send(
-                title=f"{self._notif_prefix()}Profit: {trade.product_id} +${trade.realized_pnl:,.2f}",
-                message=(
-                    f"{verb} {trade.quantity:.6g} {trade.product_id} @ ${trade.price:,.2f}\n"
-                    f"Profit: +${trade.realized_pnl:,.2f} ({pct:.1f}% of notional)\n"
-                    f"{trade.explanation}"
-                ),
-                tags="money_bag,white_check_mark",
-                priority="high",
-            )
+        # or a BUY covering a short — so this fires on either kind of round trip.
+        # Losses notify too (unless notify_on_loss is off): alerting only on wins
+        # meant a 0-for-12 losing streak produced exactly as many notifications
+        # as a crashed bot, which is how six weeks of silence went unexplained.
+        if trade.realized_pnl != 0:
+            won = trade.realized_pnl > 0
+            if won or getattr(self.config, "notify_on_loss", True):
+                notional = trade.price * trade.quantity
+                pct = (trade.realized_pnl / notional) * 100 if notional > 0 else 0
+                verb = "Covered" if trade.side == BUY else "Sold"
+                label = "Profit" if won else "Loss"
+                self._notify(
+                    title=(
+                        f"{self._notif_prefix()}{label}: {trade.product_id} "
+                        f"{trade.realized_pnl:+,.2f}"
+                    ),
+                    message=(
+                        f"{verb} {trade.quantity:.6g} {trade.product_id} @ ${trade.price:,.2f}\n"
+                        f"{label}: ${trade.realized_pnl:+,.2f} ({pct:+.1f}% of notional)\n"
+                        f"{trade.explanation}"
+                    ),
+                    tags="money_bag,white_check_mark" if won else "chart_with_downwards_trend",
+                    priority="high" if won else "default",
+                )
         return trade
 
     def _maybe_notify_new_high(self, current_equity: float) -> None:
@@ -499,7 +532,7 @@ class Engine:
             if self._peak_equity is not None:
                 change = current_equity - self._peak_equity
                 pct = change / self._peak_equity * 100
-                self.notifier.send(
+                self._notify(
                     title=f"{self._notif_prefix()}New portfolio high: ${current_equity:,.2f}",
                     message=(
                         f"Portfolio hit a new all-time high of ${current_equity:,.2f} "

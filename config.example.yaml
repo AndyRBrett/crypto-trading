@@ -198,17 +198,32 @@ lease_path: driver.json
 # Push notifications via the dashboard PWA — get phone alerts without polling.
 #
 # How to set up (one-time, takes ~2 minutes):
-#   1. Open the dashboard in Safari on your iPhone (or Chrome on Android).
+#   1. Generate a key: python -m scripts.vapid_keygen, and add the private key
+#      as a GitHub Actions secret named VAPID_PRIVATE_KEY.
+#   2. Let the bot tick once so it publishes the matching public key in
+#      state.json (the dashboard subscribes with that, so the two halves can
+#      never drift apart).
+#   3. Open the dashboard in Safari on your iPhone (or Chrome on Android).
 #      On iOS, add it to your Home Screen first so push works.
-#   2. Tap the 🔔 bell icon in the top-right corner.
-#   3. Allow notifications when the browser prompts.
-#   4. Copy the subscription JSON that appears.
-#   5. Add it as a GitHub Actions secret named PUSH_SUBSCRIPTION.
-#   6. Add VAPID_PRIVATE_KEY as a second GitHub Actions secret — generate your
-#      own key pair (see .env.example), never reuse a value from docs/history.
+#   4. Tap the 🔔 bell icon in the top-right corner and allow notifications.
+#   5. Copy the subscription JSON and add it as a second GitHub Actions secret
+#      named PUSH_SUBSCRIPTION.
+#   6. Run the "Test push notification" workflow to confirm delivery — it fails
+#      the job if the push service rejects the message.
 #
-# You'll get a "Profit" alert on every winning sell and a "New portfolio high"
-# alert whenever the portfolio hits a fresh all-time high.
+# Rotating VAPID_PRIVATE_KEY kills every existing subscription (a subscription
+# is bound to the key it was created with), so re-do steps 3-5 after any rotation.
+#
+# You'll get an alert on every closed round trip (win or loss), on each new
+# portfolio all-time high, and a heartbeat if the bot goes quiet for a week.
 #
 # No extra app to install — notifications come through the dashboard itself.
 vapid_claims_email: mailto:bot@example.com  # optional contact for VAPID
+# Notify on losing closes too, not just wins. With this off, a losing streak is
+# indistinguishable from a dead bot — both are silent.
+notify_on_loss: true
+# Send a "still alive" summary after this many days with no push at all. A
+# long-only bot parked in cash can legitimately go weeks without trading; the
+# heartbeat keeps that distinguishable from a crashed workflow or a dead
+# subscription. Set to 0 to disable.
+heartbeat_days: 7

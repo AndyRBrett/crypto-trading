@@ -126,7 +126,16 @@ portfolio_guard_enabled: false
 max_gross_exposure_pct: 1.5
 
 # News sentiment (needs the ANTHROPIC_API_KEY Actions secret; safe no-op without).
+# When the secret is missing the bot logs a warning each tick and reports it in
+# overseer-status.json errors, so "enabled but inert" can't sit unnoticed.
 sentiment_enabled: true
+
+# Push notifications. Alert on every closed round trip (win AND loss) so a
+# losing streak isn't silent, plus a weekly heartbeat so a bot sitting in cash
+# is distinguishable from a dead one. Needs the VAPID_PRIVATE_KEY and
+# PUSH_SUBSCRIPTION Actions secrets; a safe no-op without them.
+notify_on_loss: true
+heartbeat_days: 7
 
 # Publish state.json to the gh-pages branch so the dashboard updates.
 publish_enabled: true

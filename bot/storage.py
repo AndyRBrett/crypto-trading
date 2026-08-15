@@ -13,6 +13,7 @@ import sqlite3
 import time
 from pathlib import Path
 
+from .notifier import derive_public_key
 from .portfolio import Portfolio, Trade, closing_legs
 
 
@@ -22,12 +23,17 @@ def export_combined_state(
     prices: dict[str, float],
     price_history: dict | None = None,
     granularity: str = "",
+    vapid_public_key: str = "",
 ) -> None:
     """Write the unified multi-account ``state.json`` the dashboard reads.
 
     Shared market data (prices, price_history) lives at the root and is deduped
     across accounts; each account's per-account block goes in ``accounts``. A
     ``portfolio_total`` summary aggregates equity/cash/P&L across all accounts.
+
+    ``vapid_public_key`` is derived from the private key the bot signs with, so
+    the dashboard can subscribe with the matching key instead of a hardcoded
+    constant that goes stale the moment the private key is rotated.
     """
     total = {
         "starting_cash": sum(b["starting_cash"] for b in account_blocks),
@@ -76,6 +82,8 @@ def export_combined_state(
         "portfolio_total": total,
         "accounts": account_blocks,
     }
+    if vapid_public_key:
+        state["vapid_public_key"] = vapid_public_key
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(state, indent=2))
@@ -399,6 +407,9 @@ class Storage:
             "price_history": price_history or {},
             **block,
         }
+        public_key = derive_public_key(getattr(config, "vapid_private_key", ""))
+        if public_key:
+            state["vapid_public_key"] = public_key
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(state, indent=2))
