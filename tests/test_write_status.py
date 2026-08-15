@@ -305,3 +305,86 @@ def test_missing_store_is_an_error(tmp_path):
     assert status["errors"]
     assert "trades" not in status  # nothing readable, so counts are omitted
     assert status["signals_acted"] == 0
+
+
+# --- signal proximity: quiet market vs tight thresholds (issue #38) ---------
+
+def _dec(thresholds, reject_code="no_signal"):
+    return {"product_id": "ETH-USD", "action": "HOLD", "outcome": "hold",
+            "reject_code": reject_code, "thresholds": thresholds}
+
+
+def test_proximity_is_none_without_thresholds():
+    # Nothing to say → the key is absent rather than present and empty.
+    assert write_status.signal_proximity([]) is None
+    assert write_status.signal_proximity([{"outcome": "acted"}]) is None
+
+
+def test_far_from_trigger_reads_as_quiet_market():
+    # Price sat 5% from the trigger all window: the thresholds are fine, there
+    # was simply nothing to trade. Widening them here would be the wrong fix.
+    prox = write_status.signal_proximity([_dec({"breakout_dist_pct": -5.1}),
+                                _dec({"breakout_dist_pct": -4.4})])
+    assert prox["verdict"] == "quiet-market"
+    assert prox["near_trigger"] == 0
+    assert prox["metrics"]["breakout_dist_pct"]["closest"] == 4.4
+
+
+def test_repeated_near_misses_flag_tight_thresholds():
+    # Price kept grazing the trigger and never crossed — the strategy is watching
+    # the right move and declining it. That IS a calibration problem.
+    prox = write_status.signal_proximity([_dec({"breakout_dist_pct": -0.2}),
+                                _dec({"breakout_dist_pct": -0.4})])
+    assert prox["verdict"] == "thresholds-may-be-tight"
+    assert prox["near_trigger"] == 2
+
+
+def test_metrics_are_grouped_never_pooled():
+    # THE UNIT-SAFETY TEST. rsi_to_overbought is in RSI points and
+    # breakout_dist_pct is in percent; pooling them would average 39.5 against
+    # 0.3 and produce a confident, meaningless "closest" figure.
+    prox = write_status.signal_proximity([_dec({"breakout_dist_pct": -0.3,
+                                      "rsi_to_overbought": 39.5})])
+    assert set(prox["metrics"]) == {"breakout_dist_pct", "rsi_to_overbought"}
+    assert prox["metrics"]["breakout_dist_pct"]["closest"] == 0.3
+    assert prox["metrics"]["rsi_to_overbought"]["closest"] == 39.5
+
+
+def test_point_denominated_metrics_do_not_vote_on_the_verdict():
+    # An RSI sitting 0.2 POINTS from overbought is not a 0.2% near-miss, so it
+    # must not trip the percentage-based verdict on its own.
+    prox = write_status.signal_proximity([_dec({"rsi_to_overbought": 0.2})])
+    assert "near_trigger" not in prox["metrics"]["rsi_to_overbought"]
+    assert prox["verdict"] == "unknown", "no percentage gaps recorded → not provably quiet"
+
+
+def test_in_position_decisions_are_measured_against_the_exit_edge():
+    # Already holding: the trigger being waited on is the exit, not the entry.
+    prox = write_status.signal_proximity([_dec({"exit_dist_pct": 0.1}, reject_code="in_position")])
+    assert prox["metrics"]["exit_dist_pct"]["near_trigger"] == 1
+    assert prox["verdict"] == "thresholds-may-be-tight"
+
+
+def test_median_is_averaged_for_even_sample_counts():
+    prox = write_status.signal_proximity([_dec({"ma_gap_pct": 1.0}), _dec({"ma_gap_pct": 2.0})])
+    assert prox["metrics"]["ma_gap_pct"]["median"] == 1.5
+
+
+def test_unparseable_threshold_values_are_skipped_not_fatal():
+    prox = write_status.signal_proximity([_dec({"ma_gap_pct": "n/a", "breakout_dist_pct": -0.3})])
+    assert "ma_gap_pct" not in prox["metrics"]
+    assert prox["metrics"]["breakout_dist_pct"]["samples"] == 1
+
+
+def test_real_status_payload_covers_every_decision():
+    # Guards the bug found while building this: an earlier cut read only the
+    # donchian keys and silently described 2 of 10 live decisions as though they
+    # were all of them.
+    import json as _json
+    from pathlib import Path
+    payload = _json.loads(
+        (Path(__file__).resolve().parent.parent / "overseer-status.json").read_text())
+    prox = write_status.signal_proximity(payload["decisions"])
+    covered = sum(m["samples"] for m in prox["metrics"].values())
+    expected = sum(len(d.get("thresholds") or {}) for d in payload["decisions"])
+    assert covered == expected

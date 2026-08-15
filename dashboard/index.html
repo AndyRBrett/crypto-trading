@@ -160,6 +160,12 @@
   </section>
 
   <section>
+    <h2>Signal proximity<button class="info-btn inline" data-info="proximity" aria-label="What does this mean?">i</button></h2>
+    <p class="hint">When nothing trades, this says whether the market was quiet or the thresholds are too tight to ever fire.</p>
+    <div id="proximity"></div>
+  </section>
+
+  <section>
     <h2>Activity log<button class="info-btn inline" data-info="activity" aria-label="What does this mean?">i</button></h2>
     <p class="hint">Every check the bot makes is recorded here — including HOLDs. If this list is growing, the bot is alive and watching the market.</p>
     <div id="activity"></div>
@@ -321,6 +327,84 @@ function fmtThresholds(th) {
     const sign = v >= 0 ? "+" : "";
     return `${label} ${sign}${v}${k.endsWith("_pct") ? "%" : ""}`;
   }).join(" · ");
+}
+
+// Signal proximity (issue #38). Mirrors write_status.signal_proximity — the
+// canonical implementation — so the dashboard, the status file and the overseer
+// all reach the same verdict from the same rule. Same conventions: gaps grouped
+// BY METRIC and never pooled (breakout_dist_pct is a percentage,
+// rsi_to_overbought is in RSI points — averaging them is meaningless), and only
+// *_pct metrics vote on the verdict.
+const NEAR_TRIGGER_PCT = 0.5;
+
+function signalProximity(items) {
+  const byMetric = new Map();
+  for (const a of items) {
+    const th = (a.features && a.features.thresholds) || {};
+    for (const [k, v] of Object.entries(th)) {
+      const gap = Math.abs(Number(v));
+      if (!Number.isFinite(gap)) continue;
+      if (!byMetric.has(k)) byMetric.set(k, []);
+      byMetric.get(k).push(gap);
+    }
+  }
+  if (!byMetric.size) return null;
+
+  const metrics = [];
+  let nearTotal = 0, pctSamples = 0;
+  for (const [key, gaps] of [...byMetric.entries()].sort()) {
+    gaps.sort((a, b) => a - b);
+    const mid = gaps.length >> 1;
+    const median = gaps.length % 2 ? gaps[mid] : (gaps[mid - 1] + gaps[mid]) / 2;
+    const isPct = key.endsWith("_pct");
+    const near = isPct ? gaps.filter(g => g <= NEAR_TRIGGER_PCT).length : null;
+    if (isPct) { nearTotal += near; pctSamples += gaps.length; }
+    metrics.push({ key, samples: gaps.length, closest: gaps[0], median, widest: gaps[gaps.length - 1], near, isPct });
+  }
+  const verdict = nearTotal ? "thresholds-may-be-tight" : (pctSamples ? "quiet-market" : "unknown");
+  return { metrics, verdict, nearTotal, pctSamples };
+}
+
+function renderProximity(s) {
+  const el = document.getElementById("proximity");
+  if (!el) return;
+  const items = (s.activity || []).filter(a => coinMatch(a.product_id));
+  const prox = signalProximity(items);
+  if (!prox) { el.innerHTML = '<div class="empty">No threshold telemetry recorded yet.</div>'; return; }
+
+  const VERDICTS = {
+    "quiet-market": ["Quiet market", "Price stayed well clear of every trigger. Nothing to trade — the thresholds are not the problem."],
+    "thresholds-may-be-tight": ["Thresholds may be too tight", `Price came within ${NEAR_TRIGGER_PCT}% of a trigger ${prox.nearTotal} time(s) without firing. Worth widening.`],
+    "unknown": ["Not enough evidence", "No percentage-denominated gaps recorded, so a quiet market can't be confirmed either way."],
+  };
+  const [title, blurb] = VERDICTS[prox.verdict];
+
+  // Bar width is capped at 5%: past that the distinction stops mattering — every
+  // gap that large is "nowhere near", and letting one 13% outlier set the scale
+  // would flatten the near-misses that are the entire point of the panel.
+  const CAP = 5;
+  const rows = prox.metrics.map(m => {
+    const label = THRESH_LABELS[m.key] || m.key;
+    const unit = m.isPct ? "%" : "";
+    const pct = Math.min(100, (m.closest / CAP) * 100);
+    const hot = m.isPct && m.near > 0;
+    return `<tr>
+      <td>${esc(label)}</td>
+      <td class="mono">${m.closest.toFixed(2)}${unit}</td>
+      <td class="mono">${m.median.toFixed(2)}${unit}</td>
+      <td class="mono">${m.samples}</td>
+      <td style="width:40%">
+        <div style="background:rgba(127,127,127,.18);border-radius:3px;height:8px">
+          <div style="width:${pct.toFixed(1)}%;height:8px;border-radius:3px;background:${hot ? "#e5534b" : "#3fb950"}"></div>
+        </div>
+      </td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `<p><strong>${esc(title)}</strong> — ${esc(blurb)}</p>
+    <table><thead><tr>
+      <th>Threshold</th><th>Closest</th><th>Median</th><th>n</th><th>closest vs ${CAP}% away</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function renderActivity(s) {
@@ -842,7 +926,7 @@ function renderAll(s) {
   document.getElementById("updated").textContent = "updated " + ago(s.updated_at);
   renderSummary(s);
   renderCards(s); renderFilter(s); renderMainChart(s); renderRisk(s);
-  renderPositions(s); renderSignals(s); renderActivity(s); renderTrades(s);
+  renderPositions(s); renderSignals(s); renderProximity(s); renderActivity(s); renderTrades(s);
 }
 
 // --- Widget help popovers --------------------------------------------------
@@ -872,6 +956,7 @@ const INFO = {
   volatility: { title: "Volatility (annualized)", body: "How much daily returns swing around, scaled to a yearly figure. Lower means a steadier curve." },
   positions: { title: "Positions", body: "Coins the account holds right now, with their live value and paper (unrealized) profit or loss." },
   signals: { title: "Latest signals", body: "The newest reading and decision for each market the bot watches. Tap the ⓘ on any column to learn what that indicator means." },
+  proximity: { title: "Signal proximity", body: "A run of HOLDs has two very different causes, and this tells them apart. If price stayed far from every trigger, the market was quiet and doing nothing was correct. If price kept coming within a hair of a trigger and never crossed, the thresholds are too tight and want widening. Each threshold is summarised separately because they are not in the same units — channel distances are percentages, RSI and ADX gaps are index points — so only the percentage ones decide the verdict." },
   activity: { title: "Activity log", body: "Every check the bot makes — including HOLDs — so you can see it's alive and watching the market. The “how close” line shows the signed distance from each decision threshold, so you can tell how near a HOLD came to firing." },
   trades: { title: "Trade log", body: "Each completed buy and sell with a plain-English reason. The meta line shows the indicators at that moment, including ATR — the volatility measure used to size the trade and place its stop-loss." },
 };
