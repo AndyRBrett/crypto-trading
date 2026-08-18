@@ -1,6 +1,6 @@
 {
   "schema": "multi-account-v1",
-  "updated_at": 1787077170.722438,
+  "updated_at": 1787080805.2533932,
   "granularity": "ONE_DAY",
   "products": [
     "BTC-USD",
@@ -8,9 +8,9 @@
     "SOL-USD"
   ],
   "prices": {
-    "BTC-USD": 64731.47,
-    "ETH-USD": 1914.68,
-    "SOL-USD": 77.13
+    "BTC-USD": 64672.07,
+    "ETH-USD": 1912.43,
+    "SOL-USD": 77.2
   },
   "price_history": {
     "BTC-USD": [
@@ -852,7 +852,7 @@
         "o": 64477.26,
         "h": 65020.0,
         "l": 63979.36,
-        "c": 64731.47
+        "c": 64672.07
       }
     ],
     "ETH-USD": [
@@ -1694,7 +1694,7 @@
         "o": 1911.94,
         "h": 1922.25,
         "l": 1884.12,
-        "c": 1914.68
+        "c": 1912.43
       }
     ],
     "SOL-USD": [
@@ -2536,7 +2536,7 @@
         "o": 75.95,
         "h": 77.28,
         "l": 75.15,
-        "c": 77.13
+        "c": 77.2
       }
     ]
   },
@@ -2583,7 +2583,7 @@
       "latest_signals": {
         "BTC-USD": {
           "action": "HOLD",
-          "price": 64731.47,
+          "price": 64672.07,
           "strength": 0.0,
           "reasons": [
             "No crossover. Fast MA below slow MA; RSI 54.4 is neutral.",
@@ -2608,7 +2608,7 @@
           "sentiment": {
             "score": 0.15,
             "label": "neutral",
-            "summary": "Bitcoin shows mild resilience and growing institutional adoption (Citi custody, corporate treasuries) but faces near-term headwinds from rising bond yields, macro uncertainty, and traders rotating into higher-risk plays.",
+            "summary": "Bitcoin shows mild resilience with institutional adoption (Citi custody, Metaplanet treasury expansion) and outperformance against equities, but subdued momentum and rising yields testing its hedge narrative keep sentiment only modestly positive.",
             "headline_count": 15,
             "headlines": [
               "Bitcoin has gone quiet as traders chase \u20185x or 10x\u2019 payoffs elsewhere",
@@ -2621,7 +2621,7 @@
         },
         "ETH-USD": {
           "action": "HOLD",
-          "price": 1914.68,
+          "price": 1912.43,
           "strength": 0.0,
           "reasons": [
             "Fast MA above slow, but price $1,911.94 is below trend MA(200) $2,152.83 \u2014 counter-trend, skipping the buy.",
@@ -2646,7 +2646,7 @@
           "sentiment": {
             "score": 0.1,
             "label": "neutral",
-            "summary": "Mixed signals dominate ETH with bullish accumulation by Bitmine and expanding crypto support offset by upgrade compatibility risks, large unrealized losses, and regulatory uncertainty.",
+            "summary": "ETH sentiment is mixed as strong institutional accumulation by Bitmine (nearing 5% of supply) and ecosystem competition resilience offset concerns about upgrade-related tooling disruptions and Bitmine's large unrealized losses.",
             "headline_count": 12,
             "headlines": [
               "Why the Trump-backed crypto venture is distancing itself from Hong Kong AI aggregator WorldClaw",
@@ -2659,6 +2659,76 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1787080802.6009572,
+          "product_id": "ETH-USD",
+          "action": "HOLD",
+          "price": 1912.43,
+          "reason": "Fast MA above slow, but price $1,911.94 is below trend MA(200) $2,152.83 \u2014 counter-trend, skipping the buy.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 1884.46,
+              "slow_sma": 1866.86,
+              "prev_fast_sma": 1881.57,
+              "prev_slow_sma": 1865.02,
+              "rsi": 56.61,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 2152.83,
+              "atr": 47.23,
+              "adx": 14.62,
+              "sentiment_score": 0.1,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "ma_gap_pct": 0.943,
+              "rsi_to_overbought": 28.39,
+              "price_to_trend_pct": -11.189,
+              "adx_to_min": -5.38
+            },
+            "strength": 0.0
+          }
+        },
+        {
+          "timestamp": 1787080799.5508761,
+          "product_id": "BTC-USD",
+          "action": "HOLD",
+          "price": 64672.07,
+          "reason": "No crossover. Fast MA below slow MA; RSI 54.4 is neutral.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 63805.82,
+              "slow_sma": 64302.9,
+              "prev_fast_sma": 63734.41,
+              "prev_slow_sma": 64295.5,
+              "rsi": 54.35,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 71844.35,
+              "atr": 1280.53,
+              "adx": 13.51,
+              "sentiment_score": 0.15,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "ma_gap_pct": -0.773,
+              "rsi_to_overbought": 30.65,
+              "price_to_trend_pct": -10.245,
+              "adx_to_min": -6.49
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1787077163.6009111,
           "product_id": "ETH-USD",
@@ -4688,85 +4758,9 @@
             },
             "strength": 0.0
           }
-        },
-        {
-          "timestamp": 1786969082.37276,
-          "product_id": "ETH-USD",
-          "action": "HOLD",
-          "price": 1900.76,
-          "reason": "Fast MA above slow, but price $1,874.13 is below trend MA(200) $2,156.82 \u2014 counter-trend, skipping the buy.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 1881.57,
-              "slow_sma": 1865.02,
-              "prev_fast_sma": 1882.35,
-              "prev_slow_sma": 1864.65,
-              "rsi": 49.69,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 2156.82,
-              "atr": 47.28,
-              "adx": 14.53,
-              "sentiment_score": 0.42,
-              "sentiment_label": "bullish"
-            },
-            "thresholds": {
-              "ma_gap_pct": 0.887,
-              "rsi_to_overbought": 35.31,
-              "price_to_trend_pct": -13.107,
-              "adx_to_min": -5.47
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1786969079.6860077,
-          "product_id": "BTC-USD",
-          "action": "HOLD",
-          "price": 63544.19,
-          "reason": "No crossover. Fast MA below slow MA; RSI 42.0 is neutral.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 63734.41,
-              "slow_sma": 64295.5,
-              "prev_fast_sma": 63828.91,
-              "prev_slow_sma": 64355.05,
-              "rsi": 41.96,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 71963.52,
-              "atr": 1232.22,
-              "adx": 14.33,
-              "sentiment_score": 0.05,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "ma_gap_pct": -0.873,
-              "rsi_to_overbought": 43.04,
-              "price_to_trend_pct": -12.683,
-              "adx_to_min": -5.67
-            },
-            "strength": 0.0
-          }
         }
       ],
       "equity_curve": [
-        {
-          "timestamp": 1784299287.35666,
-          "cash": 10000.0,
-          "market_value": 0.0,
-          "equity": 10000.0
-        },
         {
           "timestamp": 1784304406.4650521,
           "cash": 10000.0,
@@ -7760,6 +7754,12 @@
           "cash": 10000.0,
           "market_value": 0.0,
           "equity": 10000.0
+        },
+        {
+          "timestamp": 1787080802.6023185,
+          "cash": 10000.0,
+          "market_value": 0.0,
+          "equity": 10000.0
         }
       ],
       "trades": []
@@ -7793,7 +7793,7 @@
       "latest_signals": {
         "BTC-USD": {
           "action": "HOLD",
-          "price": 64731.47,
+          "price": 64672.07,
           "strength": 0.0,
           "reasons": [
             "RSI 54.4 is between 30 and 55 \u2014 no edge, holding.",
@@ -7809,7 +7809,7 @@
           "sentiment": {
             "score": 0.15,
             "label": "neutral",
-            "summary": "Bitcoin shows mild resilience and growing institutional adoption (Citi custody, corporate treasuries) but faces near-term headwinds from rising bond yields, macro uncertainty, and traders rotating into higher-risk plays.",
+            "summary": "Bitcoin shows mild resilience with institutional adoption (Citi custody, Metaplanet treasury expansion) and outperformance against equities, but subdued momentum and rising yields testing its hedge narrative keep sentiment only modestly positive.",
             "headline_count": 15,
             "headlines": [
               "Bitcoin has gone quiet as traders chase \u20185x or 10x\u2019 payoffs elsewhere",
@@ -7822,7 +7822,7 @@
         },
         "SOL-USD": {
           "action": "HOLD",
-          "price": 77.13,
+          "price": 77.2,
           "strength": 0.0,
           "reasons": [
             "RSI 53.5 is between 30 and 55 \u2014 no edge, holding.",
@@ -7838,7 +7838,7 @@
           "sentiment": {
             "score": 0.35,
             "label": "bullish",
-            "summary": "Solana ecosystem momentum, led by a Pump token golden cross and broadening crypto adoption via Cash App and tokenized funds, points to modestly bullish near-term sentiment.",
+            "summary": "Solana ecosystem shows positive momentum with Pump token leading gainers on a golden cross signal, alongside broader crypto adoption tailwinds from Cash App and tokenization initiatives.",
             "headline_count": 4,
             "headlines": [
               "Cash App's crypto support expands beyond bitcoin and USDC via MoonPay",
@@ -7850,6 +7850,54 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1787080805.1434398,
+          "product_id": "SOL-USD",
+          "action": "HOLD",
+          "price": 77.2,
+          "reason": "RSI 53.5 is between 30 and 55 \u2014 no edge, holding.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "rsi": 53.49,
+              "rsi_period": 14,
+              "atr": 2.06,
+              "sentiment_score": 0.35,
+              "sentiment_label": "bullish"
+            },
+            "thresholds": {
+              "rsi_to_oversold": 23.49,
+              "rsi_to_overbought": 1.51
+            },
+            "strength": 0.0
+          }
+        },
+        {
+          "timestamp": 1787080802.7277737,
+          "product_id": "BTC-USD",
+          "action": "HOLD",
+          "price": 64672.07,
+          "reason": "RSI 54.4 is between 30 and 55 \u2014 no edge, holding.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "rsi": 54.35,
+              "rsi_period": 14,
+              "atr": 1280.53,
+              "sentiment_score": 0.15,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "rsi_to_oversold": 24.35,
+              "rsi_to_overbought": 0.65
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1787077166.5871522,
           "product_id": "SOL-USD",
@@ -9241,63 +9289,9 @@
             },
             "strength": 0.0
           }
-        },
-        {
-          "timestamp": 1786969085.4388218,
-          "product_id": "SOL-USD",
-          "action": "HOLD",
-          "price": 75.46,
-          "reason": "RSI 47.6 is between 30 and 55 \u2014 no edge, holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "rsi": 47.61,
-              "rsi_period": 14,
-              "atr": 2.08,
-              "sentiment_score": 0.42,
-              "sentiment_label": "bullish"
-            },
-            "thresholds": {
-              "rsi_to_oversold": 17.61,
-              "rsi_to_overbought": 7.39
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1786969082.4859006,
-          "product_id": "BTC-USD",
-          "action": "HOLD",
-          "price": 63544.19,
-          "reason": "RSI 42.0 is between 30 and 55 \u2014 no edge, holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "rsi": 41.96,
-              "rsi_period": 14,
-              "atr": 1232.22,
-              "sentiment_score": 0.05,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "rsi_to_oversold": 11.96,
-              "rsi_to_overbought": 13.04
-            },
-            "strength": 0.0
-          }
         }
       ],
       "equity_curve": [
-        {
-          "timestamp": 1784299287.4772432,
-          "cash": 10000.0,
-          "market_value": 0.0,
-          "equity": 10000.0
-        },
         {
           "timestamp": 1784304406.8021936,
           "cash": 10000.0,
@@ -12291,6 +12285,12 @@
           "cash": 10000.0,
           "market_value": 0.0,
           "equity": 10000.0
+        },
+        {
+          "timestamp": 1787080805.1451013,
+          "cash": 10000.0,
+          "market_value": 0.0,
+          "equity": 10000.0
         }
       ],
       "trades": []
@@ -12324,7 +12324,7 @@
       "latest_signals": {
         "ETH-USD": {
           "action": "HOLD",
-          "price": 1914.68,
+          "price": 1912.43,
           "strength": 0.0,
           "reasons": [
             "Price $1,911.94 inside the channel ($1,851.45 \u2013 $1,942.00) \u2014 holding.",
@@ -12341,7 +12341,7 @@
           "sentiment": {
             "score": 0.1,
             "label": "neutral",
-            "summary": "Mixed signals dominate ETH with bullish accumulation by Bitmine and expanding crypto support offset by upgrade compatibility risks, large unrealized losses, and regulatory uncertainty.",
+            "summary": "ETH sentiment is mixed as strong institutional accumulation by Bitmine (nearing 5% of supply) and ecosystem competition resilience offset concerns about upgrade-related tooling disruptions and Bitmine's large unrealized losses.",
             "headline_count": 12,
             "headlines": [
               "Why the Trump-backed crypto venture is distancing itself from Hong Kong AI aggregator WorldClaw",
@@ -12354,7 +12354,7 @@
         },
         "SOL-USD": {
           "action": "HOLD",
-          "price": 77.13,
+          "price": 77.2,
           "strength": 0.0,
           "reasons": [
             "Price $75.95 inside the channel ($72.38 \u2013 $77.75) \u2014 holding.",
@@ -12371,7 +12371,7 @@
           "sentiment": {
             "score": 0.35,
             "label": "bullish",
-            "summary": "Solana ecosystem momentum, led by a Pump token golden cross and broadening crypto adoption via Cash App and tokenized funds, points to modestly bullish near-term sentiment.",
+            "summary": "Solana ecosystem shows positive momentum with Pump token leading gainers on a golden cross signal, alongside broader crypto adoption tailwinds from Cash App and tokenization initiatives.",
             "headline_count": 4,
             "headlines": [
               "Cash App's crypto support expands beyond bitcoin and USDC via MoonPay",
@@ -12383,6 +12383,56 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1787080805.1562784,
+          "product_id": "SOL-USD",
+          "action": "HOLD",
+          "price": 77.2,
+          "reason": "Price $75.95 inside the channel ($72.38 \u2013 $77.75) \u2014 holding.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "donchian_upper": 77.75,
+              "donchian_lower": 72.38,
+              "donchian_period": 20,
+              "atr": 2.06,
+              "sentiment_score": 0.35,
+              "sentiment_label": "bullish"
+            },
+            "thresholds": {
+              "breakout_dist_pct": -2.315,
+              "exit_dist_pct": 4.932
+            },
+            "strength": 0.0
+          }
+        },
+        {
+          "timestamp": 1787080805.1538334,
+          "product_id": "ETH-USD",
+          "action": "HOLD",
+          "price": 1912.43,
+          "reason": "Price $1,911.94 inside the channel ($1,851.45 \u2013 $1,942.00) \u2014 holding.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "donchian_upper": 1942.0,
+              "donchian_lower": 1851.45,
+              "donchian_period": 20,
+              "atr": 47.23,
+              "sentiment_score": 0.1,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "breakout_dist_pct": -1.548,
+              "exit_dist_pct": 3.267
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1787077166.5998633,
           "product_id": "SOL-USD",
@@ -13832,65 +13882,9 @@
             },
             "strength": 0.0
           }
-        },
-        {
-          "timestamp": 1786969085.4505806,
-          "product_id": "SOL-USD",
-          "action": "HOLD",
-          "price": 75.46,
-          "reason": "Price $74.54 inside the channel ($72.28 \u2013 $77.75) \u2014 holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "donchian_upper": 77.75,
-              "donchian_lower": 72.28,
-              "donchian_period": 20,
-              "atr": 2.08,
-              "sentiment_score": 0.42,
-              "sentiment_label": "bullish"
-            },
-            "thresholds": {
-              "breakout_dist_pct": -4.129,
-              "exit_dist_pct": 3.127
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1786969085.448989,
-          "product_id": "ETH-USD",
-          "action": "HOLD",
-          "price": 1900.76,
-          "reason": "Price $1,874.13 inside the channel ($1,851.45 \u2013 $1,979.00) \u2014 holding.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "donchian_upper": 1979.0,
-              "donchian_lower": 1851.45,
-              "donchian_period": 20,
-              "atr": 47.28,
-              "sentiment_score": 0.42,
-              "sentiment_label": "bullish"
-            },
-            "thresholds": {
-              "breakout_dist_pct": -5.299,
-              "exit_dist_pct": 1.225
-            },
-            "strength": 0.0
-          }
         }
       ],
       "equity_curve": [
-        {
-          "timestamp": 1784299287.485512,
-          "cash": 8301.575640294963,
-          "market_value": 1103.0898928667923,
-          "equity": 9404.665533161755
-        },
         {
           "timestamp": 1784304406.8112762,
           "cash": 8301.575640294963,
@@ -16884,6 +16878,12 @@
           "cash": 9399.2866788729,
           "market_value": 0.0,
           "equity": 9399.2866788729
+        },
+        {
+          "timestamp": 1787080805.1572437,
+          "cash": 9399.2866788729,
+          "market_value": 0.0,
+          "equity": 9399.2866788729
         }
       ],
       "trades": [
@@ -17278,7 +17278,7 @@
       "latest_signals": {
         "BTC-USD": {
           "action": "HOLD",
-          "price": 64731.47,
+          "price": 64672.07,
           "strength": 0.0,
           "reasons": [
             "No qualifying trend. Fast MA below slow MA; RSI 54.4; waiting for a confirmed trend with the long-term MA.",
@@ -17303,7 +17303,7 @@
           "sentiment": {
             "score": 0.15,
             "label": "neutral",
-            "summary": "Bitcoin shows mild resilience and growing institutional adoption (Citi custody, corporate treasuries) but faces near-term headwinds from rising bond yields, macro uncertainty, and traders rotating into higher-risk plays.",
+            "summary": "Bitcoin shows mild resilience with institutional adoption (Citi custody, Metaplanet treasury expansion) and outperformance against equities, but subdued momentum and rising yields testing its hedge narrative keep sentiment only modestly positive.",
             "headline_count": 15,
             "headlines": [
               "Bitcoin has gone quiet as traders chase \u20185x or 10x\u2019 payoffs elsewhere",
@@ -17316,7 +17316,7 @@
         },
         "ETH-USD": {
           "action": "HOLD",
-          "price": 1914.68,
+          "price": 1912.43,
           "strength": 0.0,
           "reasons": [
             "No qualifying trend. Fast MA above slow MA; RSI 56.6; waiting for a confirmed trend with the long-term MA.",
@@ -17341,7 +17341,7 @@
           "sentiment": {
             "score": 0.1,
             "label": "neutral",
-            "summary": "Mixed signals dominate ETH with bullish accumulation by Bitmine and expanding crypto support offset by upgrade compatibility risks, large unrealized losses, and regulatory uncertainty.",
+            "summary": "ETH sentiment is mixed as strong institutional accumulation by Bitmine (nearing 5% of supply) and ecosystem competition resilience offset concerns about upgrade-related tooling disruptions and Bitmine's large unrealized losses.",
             "headline_count": 12,
             "headlines": [
               "Why the Trump-backed crypto venture is distancing itself from Hong Kong AI aggregator WorldClaw",
@@ -17354,6 +17354,78 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1787080805.1701972,
+          "product_id": "ETH-USD",
+          "action": "HOLD",
+          "price": 1912.43,
+          "reason": "No qualifying trend. Fast MA above slow MA; RSI 56.6; waiting for a confirmed trend with the long-term MA.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 1884.46,
+              "slow_sma": 1866.86,
+              "prev_fast_sma": 1881.57,
+              "prev_slow_sma": 1865.02,
+              "rsi": 56.61,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 2152.83,
+              "atr": 47.23,
+              "adx": 14.62,
+              "sentiment_score": 0.1,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "ma_gap_pct": 0.943,
+              "rsi_to_overbought": 28.39,
+              "rsi_to_oversold": 41.61,
+              "price_to_trend_pct": -11.189,
+              "adx_to_min": -5.38
+            },
+            "strength": 0.0
+          }
+        },
+        {
+          "timestamp": 1787080805.1673641,
+          "product_id": "BTC-USD",
+          "action": "HOLD",
+          "price": 64672.07,
+          "reason": "No qualifying trend. Fast MA below slow MA; RSI 54.4; waiting for a confirmed trend with the long-term MA.",
+          "outcome": "hold",
+          "reject_code": "no_signal",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "fast_sma": 63805.82,
+              "slow_sma": 64302.9,
+              "prev_fast_sma": 63734.41,
+              "prev_slow_sma": 64295.5,
+              "rsi": 54.35,
+              "ma_type": "ema",
+              "fast_period": 20,
+              "slow_period": 50,
+              "rsi_period": 14,
+              "trend_ma": 71844.35,
+              "atr": 1280.53,
+              "adx": 13.51,
+              "sentiment_score": 0.15,
+              "sentiment_label": "neutral"
+            },
+            "thresholds": {
+              "ma_gap_pct": -0.773,
+              "rsi_to_overbought": 30.65,
+              "rsi_to_oversold": 39.35,
+              "price_to_trend_pct": -10.245,
+              "adx_to_min": -6.49
+            },
+            "strength": 0.0
+          }
+        },
         {
           "timestamp": 1787077170.6344142,
           "product_id": "ETH-USD",
@@ -19441,87 +19513,9 @@
             },
             "strength": 0.0
           }
-        },
-        {
-          "timestamp": 1786965276.741247,
-          "product_id": "ETH-USD",
-          "action": "HOLD",
-          "price": 1905.39,
-          "reason": "No qualifying trend. Fast MA above slow MA; RSI 49.7; waiting for a confirmed trend with the long-term MA.",
-          "outcome": "hold",
-          "reject_code": "in_position",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 1881.57,
-              "slow_sma": 1865.02,
-              "prev_fast_sma": 1882.35,
-              "prev_slow_sma": 1864.65,
-              "rsi": 49.69,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 2156.82,
-              "atr": 47.28,
-              "adx": 14.53,
-              "sentiment_score": 0.35,
-              "sentiment_label": "bullish"
-            },
-            "thresholds": {
-              "ma_gap_pct": 0.887,
-              "rsi_to_overbought": 35.31,
-              "rsi_to_oversold": 34.69,
-              "price_to_trend_pct": -13.107,
-              "adx_to_min": -5.47
-            },
-            "strength": 0.0
-          }
-        },
-        {
-          "timestamp": 1786965276.7380219,
-          "product_id": "BTC-USD",
-          "action": "HOLD",
-          "price": 63592.5,
-          "reason": "No qualifying trend. Fast MA below slow MA; RSI 42.0; waiting for a confirmed trend with the long-term MA.",
-          "outcome": "hold",
-          "reject_code": "no_signal",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "fast_sma": 63734.41,
-              "slow_sma": 64295.5,
-              "prev_fast_sma": 63828.91,
-              "prev_slow_sma": 64355.05,
-              "rsi": 41.96,
-              "ma_type": "ema",
-              "fast_period": 20,
-              "slow_period": 50,
-              "rsi_period": 14,
-              "trend_ma": 71963.52,
-              "atr": 1232.22,
-              "adx": 14.33,
-              "sentiment_score": 0.1,
-              "sentiment_label": "neutral"
-            },
-            "thresholds": {
-              "ma_gap_pct": -0.873,
-              "rsi_to_overbought": 43.04,
-              "rsi_to_oversold": 26.96,
-              "price_to_trend_pct": -12.683,
-              "adx_to_min": -5.67
-            },
-            "strength": 0.0
-          }
         }
       ],
       "equity_curve": [
-        {
-          "timestamp": 1784293115.1520665,
-          "cash": 12670.125687341786,
-          "market_value": -2688.6277013408094,
-          "equity": 9981.497986000977
-        },
         {
           "timestamp": 1784299287.49856,
           "cash": 12670.125687341786,
@@ -22515,6 +22509,12 @@
           "cash": 9805.9441237776,
           "market_value": 0.0,
           "equity": 9805.9441237776
+        },
+        {
+          "timestamp": 1787080805.171194,
+          "cash": 9805.9441237776,
+          "market_value": 0.0,
+          "equity": 9805.9441237776
         }
       ],
       "trades": [
@@ -22864,7 +22864,7 @@
       "latest_signals": {
         "BTC-USD": {
           "action": "SELL",
-          "price": 64731.47,
+          "price": 64672.07,
           "strength": 1.0,
           "reasons": [
             "Price $64,484.18 broke below the 200-period trend MA $71,844.35 \u2014 regime break, moving to cash."
@@ -22877,7 +22877,7 @@
           "sentiment": {
             "score": 0.15,
             "label": "neutral",
-            "summary": "Bitcoin shows mild resilience and growing institutional adoption (Citi custody, corporate treasuries) but faces near-term headwinds from rising bond yields, macro uncertainty, and traders rotating into higher-risk plays.",
+            "summary": "Bitcoin shows mild resilience with institutional adoption (Citi custody, Metaplanet treasury expansion) and outperformance against equities, but subdued momentum and rising yields testing its hedge narrative keep sentiment only modestly positive.",
             "headline_count": 15,
             "headlines": [
               "Bitcoin has gone quiet as traders chase \u20185x or 10x\u2019 payoffs elsewhere",
@@ -22890,7 +22890,7 @@
         },
         "ETH-USD": {
           "action": "SELL",
-          "price": 1914.68,
+          "price": 1912.43,
           "strength": 1.0,
           "reasons": [
             "Price $1,911.94 broke below the 200-period trend MA $2,152.83 \u2014 regime break, moving to cash."
@@ -22903,7 +22903,7 @@
           "sentiment": {
             "score": 0.1,
             "label": "neutral",
-            "summary": "Mixed signals dominate ETH with bullish accumulation by Bitmine and expanding crypto support offset by upgrade compatibility risks, large unrealized losses, and regulatory uncertainty.",
+            "summary": "ETH sentiment is mixed as strong institutional accumulation by Bitmine (nearing 5% of supply) and ecosystem competition resilience offset concerns about upgrade-related tooling disruptions and Bitmine's large unrealized losses.",
             "headline_count": 12,
             "headlines": [
               "Why the Trump-backed crypto venture is distancing itself from Hong Kong AI aggregator WorldClaw",
@@ -22916,6 +22916,48 @@
         }
       },
       "activity": [
+        {
+          "timestamp": 1787080805.18343,
+          "product_id": "ETH-USD",
+          "action": "SELL",
+          "price": 1912.43,
+          "reason": "Price $1,911.94 broke below the 200-period trend MA $2,152.83 \u2014 regime break, moving to cash.",
+          "outcome": "hold",
+          "reject_code": "no_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "trend_ma": 2152.83,
+              "trend_period": 200,
+              "atr": 47.23
+            },
+            "thresholds": {
+              "price_to_trend_pct": -11.189
+            },
+            "strength": 1.0
+          }
+        },
+        {
+          "timestamp": 1787080805.1813505,
+          "product_id": "BTC-USD",
+          "action": "SELL",
+          "price": 64672.07,
+          "reason": "Price $64,484.18 broke below the 200-period trend MA $71,844.35 \u2014 regime break, moving to cash.",
+          "outcome": "hold",
+          "reject_code": "no_position",
+          "slippage_bps": null,
+          "features": {
+            "indicators": {
+              "trend_ma": 71844.35,
+              "trend_period": 200,
+              "atr": 1280.53
+            },
+            "thresholds": {
+              "price_to_trend_pct": -10.245
+            },
+            "strength": 1.0
+          }
+        },
         {
           "timestamp": 1787077170.6488624,
           "product_id": "ETH-USD",
@@ -24133,57 +24175,9 @@
             },
             "strength": 1.0
           }
-        },
-        {
-          "timestamp": 1786965276.7540758,
-          "product_id": "ETH-USD",
-          "action": "SELL",
-          "price": 1905.39,
-          "reason": "Price $1,874.13 broke below the 200-period trend MA $2,156.82 \u2014 regime break, moving to cash.",
-          "outcome": "hold",
-          "reject_code": "no_position",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "trend_ma": 2156.82,
-              "trend_period": 200,
-              "atr": 47.28
-            },
-            "thresholds": {
-              "price_to_trend_pct": -13.107
-            },
-            "strength": 1.0
-          }
-        },
-        {
-          "timestamp": 1786965276.752105,
-          "product_id": "BTC-USD",
-          "action": "SELL",
-          "price": 63592.5,
-          "reason": "Price $62,836.66 broke below the 200-period trend MA $71,963.52 \u2014 regime break, moving to cash.",
-          "outcome": "hold",
-          "reject_code": "no_position",
-          "slippage_bps": null,
-          "features": {
-            "indicators": {
-              "trend_ma": 71963.52,
-              "trend_period": 200,
-              "atr": 1232.22
-            },
-            "thresholds": {
-              "price_to_trend_pct": -12.683
-            },
-            "strength": 1.0
-          }
         }
       ],
       "equity_curve": [
-        {
-          "timestamp": 1784293115.1611302,
-          "cash": 10000.0,
-          "market_value": 0.0,
-          "equity": 10000.0
-        },
         {
           "timestamp": 1784299287.507677,
           "cash": 10000.0,
@@ -27174,6 +27168,12 @@
         },
         {
           "timestamp": 1787077170.6497295,
+          "cash": 10000.0,
+          "market_value": 0.0,
+          "equity": 10000.0
+        },
+        {
+          "timestamp": 1787080805.1844418,
           "cash": 10000.0,
           "market_value": 0.0,
           "equity": 10000.0
