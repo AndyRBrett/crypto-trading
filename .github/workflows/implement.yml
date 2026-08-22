@@ -70,6 +70,43 @@ jobs:
           esac
           echo "number=$RAW" >> "$GITHUB_OUTPUT"
 
+      # WHO WROTE THE ISSUE decides whether an agent may act on it.
+      #
+      # Everything below treats the issue text as this agent's instructions: the
+      # prompt's first step is `gh issue view <n> --comments`, and the agent runs
+      # with Bash, contents: write and an Anthropic key. On a public repo anyone
+      # can open an issue and anyone can comment on one, so without this check
+      # that text is written by whoever showed up.
+      #
+      # The dispatcher is not a substitute for this. The overseer now checks
+      # author_association before an issue enters its ledger, but that guard
+      # lives in another process and another repo, and this workflow answers to
+      # more than the ledger: a workflow_dispatch, or a repository_dispatch from
+      # anyone holding a token with actions: write here, reaches the agent
+      # without the ledger being consulted at all. This is the check that is
+      # actually in the path every time.
+      #
+      # author_association is GitHub's own answer and cannot be set by the
+      # author: OWNER/MEMBER/COLLABORATOR all mean write access to this repo.
+      # Pipeline-filed issues arrive as OWNER, so the legitimate path is
+      # unaffected. Anything else stops here, before a paid token is spent.
+      - name: Refuse issues from untrusted authors
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ steps.issue.outputs.number }}
+        run: |
+          assoc=$(gh issue view "$ISSUE" --json authorAssociation --jq .authorAssociation)
+          author=$(gh issue view "$ISSUE" --json author --jq .author.login)
+          case "$assoc" in
+            OWNER|MEMBER|COLLABORATOR)
+              echo "Issue #$ISSUE was filed by $author ($assoc) — trusted."
+              ;;
+            *)
+              echo "::error title=Untrusted issue author::Issue #$ISSUE was filed by $author ($assoc), who does not have write access to this repository. Refusing to hand attacker-controllable text to a coding agent."
+              exit 1
+              ;;
+          esac
+
       # Tier NAME in, model id out. The name may come from a repository_dispatch
       # payload — i.e. over the API — and the model is interpolated into the
       # Claude CLI's arguments, so anything not on this list is refused rather
