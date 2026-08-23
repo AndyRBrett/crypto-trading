@@ -133,14 +133,14 @@ jobs:
           echo "model=$model" >> "$GITHUB_OUTPUT"
           echo "Running issue #${{ steps.issue.outputs.number }} on the $tier tier ($model)" >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0   # the agent branches and pushes
 
       # Mirrors ci.yml exactly, so the agent builds and tests against the same
       # toolchain that gates this repo's pull requests.
       - name: Set up the project
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
           cache: pip
@@ -150,7 +150,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Implement it
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@24dcd50c0568f0fc9e9211213a4fd2d9eb15c4e0 # v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
