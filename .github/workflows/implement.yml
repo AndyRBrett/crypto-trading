@@ -93,10 +93,26 @@ jobs:
       - name: Refuse issues from untrusted authors
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           ISSUE: ${{ steps.issue.outputs.number }}
         run: |
-          assoc=$(gh issue view "$ISSUE" --json authorAssociation --jq .authorAssociation)
-          author=$(gh issue view "$ISSUE" --json author --jq .author.login)
+          # One REST read, NOT `gh issue view --json authorAssociation`: that
+          # field does not exist on `gh issue view`, so the command exits 1 with
+          # a list of the valid ones and this guard then refuses every issue —
+          # including the pipeline's own. It shipped that way to four repos and
+          # killed three dispatches at this gate on 2026-08-24. The REST issue
+          # object does carry author_association, and `gh api` resolves it from
+          # an explicit path, so it also works before the repo is checked out.
+          meta=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE" \
+                   --jq '.author_association + " " + .user.login')
+          assoc=${meta%% *}
+          author=${meta#* }
+          # Fail CLOSED: a guard that cannot read the issue must not wave it
+          # through on the assumption that silence means safety.
+          if [ -z "$assoc" ]; then
+            echo "::error title=Could not read the issue::No author_association for issue #$ISSUE — refusing rather than guessing."
+            exit 1
+          fi
           case "$assoc" in
             OWNER|MEMBER|COLLABORATOR)
               echo "Issue #$ISSUE was filed by $author ($assoc) — trusted."
@@ -213,6 +229,14 @@ jobs:
         if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Without this, gh infers the repo from the git remote — and when a
+          # step BEFORE the checkout fails, there is no git remote. Every
+          # `gh issue edit`/`comment` here then died on "not a git repository",
+          # `|| true` swallowed it, and the step reported success having done
+          # nothing: the issue kept overseer:implementing, so the gate treated
+          # it as still in progress and it could never be picked up again. An
+          # explicit repo needs no checkout.
+          GH_REPO: ${{ github.repository }}
           ISSUE: ${{ steps.issue.outputs.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
