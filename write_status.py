@@ -174,6 +174,7 @@ def collect_metrics(now: float | None = None) -> dict:
     errors: list[str] = []
     push_errors: set[str] = set()      # distinct push failures across the stores
     config_warnings: set[str] = set()  # settings enabled but inert (missing secret)
+    equity_skip_warnings: set[str] = set()  # stores currently stuck on a stale equity snapshot
     last_notify: float | None = None   # most recent successful push, any account
 
     db_paths = sorted(glob.glob(DB_GLOB))
@@ -244,6 +245,26 @@ def collect_metrics(now: float | None = None) -> dict:
                 meta = {}
             if meta.get("last_push_error"):
                 push_errors.add(meta["last_push_error"].splitlines()[0])
+            # last_equity_skip_at is cleared the moment a store snapshots
+            # successfully again, so its presence means the *most recent* tick
+            # is still stuck — the merged equity curve is flatlining on this
+            # store's contribution right now, not just did once in the past
+            # (issue #50: a 25h price freeze that read as "quiet market"
+            # instead of "can't price the position").
+            if meta.get("last_equity_skip_at"):
+                products = meta.get("last_equity_skip_products") or "?"
+                try:
+                    since = _iso(float(meta["last_equity_skip_at"]))
+                except (TypeError, ValueError):
+                    # An unparseable stamp still means the store is stuck. Going
+                    # quiet here would rebuild the very bug this block exists to
+                    # catch — a live fault with nothing in `errors` — inside its
+                    # own error path.
+                    since = f"an unreadable time ({meta['last_equity_skip_at']!r})"
+                equity_skip_warnings.add(
+                    f"equity snapshot stale since {since}: "
+                    f"no fresh price for {products}"
+                )
             for warning in (meta.get("config_warnings") or "").splitlines():
                 if warning.strip():
                     config_warnings.add(warning.strip())
@@ -377,6 +398,8 @@ def collect_metrics(now: float | None = None) -> dict:
         errors.append(f"push notification failing: {msg}")
     for msg in sorted(config_warnings):
         errors.append(f"config: {msg}")
+    for msg in sorted(equity_skip_warnings):
+        errors.append(msg)
     status["errors"] = errors
     return status
 

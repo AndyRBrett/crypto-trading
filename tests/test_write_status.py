@@ -307,6 +307,76 @@ def test_missing_store_is_an_error(tmp_path):
     assert status["signals_acted"] == 0
 
 
+def test_stale_equity_skip_is_surfaced_as_an_error(tmp_path):
+    # engine.tick() persists last_equity_skip_at/_products when it skips a
+    # snapshot for lack of a fresh price (bot/engine.py); until a later tick
+    # snapshots successfully and clears it, that store's contribution to the
+    # merged equity curve is flatlining with no other signal of why (issue
+    # #50 — a 25h price freeze that read as a quiet market, not a fault).
+    now = 1_700_000_000.0
+    _store_in(str(tmp_path), now)
+    s = Storage(os.path.join(str(tmp_path), "trading.test.db"))
+    s.set_meta("last_equity_skip_at", str(now - 60))
+    s.set_meta("last_equity_skip_products", "ETH-USD")
+    s.close()
+
+    status = write_status.collect_metrics(now)
+    assert any("ETH-USD" in e and "stale" in e for e in status["errors"])
+
+
+def test_cleared_equity_skip_is_not_surfaced(tmp_path):
+    now = 1_700_000_000.0
+    _store_in(str(tmp_path), now)
+    s = Storage(os.path.join(str(tmp_path), "trading.test.db"))
+    s.set_meta("last_equity_skip_at", "")
+    s.close()
+
+    status = write_status.collect_metrics(now)
+    # Named rather than `== []`, so an unrelated error fails its own test
+    # instead of this one.
+    assert not any("equity snapshot stale" in e for e in status["errors"])
+
+
+def test_unreadable_skip_stamp_still_reports(tmp_path):
+    # The alarm must not go quiet on its own error path. A store stuck with a
+    # corrupt stamp is still stuck, and reporting nothing rebuilds exactly the
+    # bug this whole block exists to catch: a live fault with `errors: []`.
+    now = 1_700_000_000.0
+    _store_in(str(tmp_path), now)
+    s = Storage(os.path.join(str(tmp_path), "trading.test.db"))
+    s.set_meta("last_equity_skip_at", "not-a-timestamp")
+    s.set_meta("last_equity_skip_products", "ETH-USD")
+    s.close()
+
+    status = write_status.collect_metrics(now)
+    assert any("ETH-USD" in e and "stale" in e for e in status["errors"])
+
+
+def test_a_frozen_store_is_what_the_curve_freeze_looked_like(tmp_path):
+    # The symptom as filed (issue #50), not just the mechanism: SEVEN equity
+    # points ~3-4h apart, byte-identical to the cent, with errors empty.
+    #
+    # It looks impossible for a skipped snapshot to produce ROWS — a skip writes
+    # none. _merge_equity is why it does: at each observed timestamp it
+    # forward-fills every store's last snapshot and sums. So a store that stops
+    # snapshotting is carried forward at a fixed value while another store's
+    # ticks keep supplying timestamps, and the total advances in time without
+    # moving. That is the curve in the issue, and this pins it.
+    now = 1_700_000_000.0
+    _store_in(str(tmp_path), now)
+
+    frozen = Storage(os.path.join(str(tmp_path), "trading.frozen.db"))
+    frozen.save_equity(1000.0, 500.0, 1500.0)      # last good snapshot, then stuck
+    frozen.set_meta("last_equity_skip_at", str(now - 25 * 3600))
+    frozen.set_meta("last_equity_skip_products", "ETH-USD,SOL-USD")
+    frozen.close()
+
+    status = write_status.collect_metrics(now)
+    stale = [e for e in status["errors"] if "equity snapshot stale" in e]
+    assert stale, "a store frozen for 25h reported no error — the original bug"
+    assert "ETH-USD,SOL-USD" in stale[0]
+
+
 # --- signal proximity: quiet market vs tight thresholds (issue #38) ---------
 
 def _dec(thresholds, reject_code="no_signal"):
