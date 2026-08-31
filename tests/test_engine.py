@@ -318,3 +318,4 @@ def test_equity_snapshot_skipped_when_open_position_unpriced():
     eng.tick()
     assert len(rec.equity_snapshots) == 1
     assert rec.get_meta("last_equity_skip_at") == ""
+    assert rec.get_meta("last_equity_skip_products") == ""

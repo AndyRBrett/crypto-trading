@@ -279,6 +279,11 @@ class Engine:
                     current_equity,
                 )
                 self.storage.set_meta("last_equity_skip_at", "")
+                # Clear the products too. The read above is gated on _at, so a
+                # stale list is inert today — but leaving a recovered store
+                # claiming "no fresh price for ETH-USD" is a trap for the next
+                # reader of this table.
+                self.storage.set_meta("last_equity_skip_products", "")
                 self._maybe_notify_new_high(current_equity)
             self.storage.export_state(
                 self.config.dashboard_state_path,

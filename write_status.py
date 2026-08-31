@@ -252,16 +252,19 @@ def collect_metrics(now: float | None = None) -> dict:
             # (issue #50: a 25h price freeze that read as "quiet market"
             # instead of "can't price the position").
             if meta.get("last_equity_skip_at"):
+                products = meta.get("last_equity_skip_products") or "?"
                 try:
-                    skip_ts = float(meta["last_equity_skip_at"])
-                except ValueError:
-                    skip_ts = None
-                if skip_ts is not None:
-                    products = meta.get("last_equity_skip_products") or "?"
-                    equity_skip_warnings.add(
-                        f"equity snapshot stale since {_iso(skip_ts)}: "
-                        f"no fresh price for {products}"
-                    )
+                    since = _iso(float(meta["last_equity_skip_at"]))
+                except (TypeError, ValueError):
+                    # An unparseable stamp still means the store is stuck. Going
+                    # quiet here would rebuild the very bug this block exists to
+                    # catch — a live fault with nothing in `errors` — inside its
+                    # own error path.
+                    since = f"an unreadable time ({meta['last_equity_skip_at']!r})"
+                equity_skip_warnings.add(
+                    f"equity snapshot stale since {since}: "
+                    f"no fresh price for {products}"
+                )
             for warning in (meta.get("config_warnings") or "").splitlines():
                 if warning.strip():
                     config_warnings.add(warning.strip())
