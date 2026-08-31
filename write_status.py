@@ -203,6 +203,8 @@ def collect_metrics(now: float | None = None) -> dict:
     # Per-signal decision log for the run that just executed (issue #23).
     decisions: list[dict] = []
 
+    closed_legs: list[tuple[float, str, float]] = []   # (ts, product, realized)
+
     def _mark(product_id: str, ts: float, price: float) -> None:
         """Record a price observation so the window's start/end marks can be found."""
         if product_id not in first_mark or ts < first_mark[product_id][0]:
@@ -317,6 +319,12 @@ def collect_metrics(now: float | None = None) -> dict:
                     buy_notional[t.product_id] = (
                         buy_notional.get(t.product_id, 0.0) + t.price * t.quantity
                     )
+            # Every closing leg inside the widest window, kept once for the
+            # per-asset breakdown below (#51). Gathered here rather than in a
+            # second pass because the replay that classifies opening vs closing
+            # legs is the expensive part and it is already running.
+            if id(t) in closers and ts >= window_starts[max(windows)]:
+                closed_legs.append((ts, t.product_id, t.realized_pnl))
             for d in windows:
                 if ts >= window_starts[d]:
                     fills[d] += 1
@@ -350,6 +358,11 @@ def collect_metrics(now: float | None = None) -> dict:
         for d in EXTRA_WINDOW_DAYS:
             status[f"pnl_{d}d"] = round(pnl[d], 2)
             status[f"trades_{d}d"] = fills[d]
+        # Which asset is doing this (#51). Omitted entirely when nothing closed,
+        # so an empty book reads as no data rather than a table of zeroes.
+        by_asset = attribution(closed_legs, window_starts, windows)
+        if by_asset:
+            status["attribution"] = by_asset
         # Buy-and-hold benchmark + equity curve (issue #22): turn the bare P&L
         # into alpha-vs-holding. Omitted when nothing was deployed in the window.
         benchmark = _benchmark(pnl[WINDOW_DAYS], buy_notional, first_mark, last_mark)
@@ -528,6 +541,66 @@ def signal_proximity(decisions, near_pct=NEAR_TRIGGER_PCT):
         "verdict": ("thresholds-may-be-tight" if near_total
                     else "quiet-market" if pct_samples else "unknown"),
     }
+
+
+# --- per-asset attribution (issue #51) -------------------------------------
+#
+# Portfolio P&L answers "how did we do"; it cannot answer "which asset is
+# costing us", which is the question you act on. A book that is flat overall can
+# be one asset quietly bleeding into another one carrying it, and the status
+# file showed only the sum.
+#
+# NOTE ON DRAWDOWN. bot.metrics.max_drawdown is deliberately NOT reused here. It
+# returns a FRACTION (equity / peak - 1), which needs a positive equity base; a
+# cumulative realized-P&L curve starts at zero and can sit negative, where that
+# formula divides by a peak of zero or flips sign against a negative one. The
+# honest per-asset measure is the absolute peak-to-trough decline in dollars, so
+# that is what this computes and what the field is named after — never a percent
+# that would look comparable to risk_metrics.max_drawdown_pct and mean something
+# entirely different.
+
+
+def realized_drawdown(legs):
+    """Worst peak-to-trough fall of cumulative realized P&L, in dollars (<= 0).
+
+    `legs` is [(timestamp, realized_pnl), ...] in any order; it is sorted here so
+    a caller cannot get a subtly wrong answer by passing store-ordered rows.
+    """
+    cumulative = 0.0
+    peak = 0.0
+    worst = 0.0
+    for _ts, realized in sorted(legs, key=lambda leg: leg[0]):
+        cumulative += realized
+        peak = max(peak, cumulative)
+        worst = min(worst, cumulative - peak)
+    return worst
+
+
+def attribution(closed_legs, window_starts, windows):
+    """Per-asset P&L, closed-trade count and realized drawdown, per window.
+
+    Shaped asset-first ({"BTC-USD": {"7d": {...}}}) because that is the question
+    being asked — which asset is doing this — and it is what a panel iterates.
+    Assets with no closed trade in any window are omitted rather than reported as
+    zeroes: a symbol the strategy never closed is not a flat performer.
+    """
+    products = sorted({product for _ts, product, _pnl in closed_legs})
+    out = {}
+    for product in products:
+        per_window = {}
+        for d in windows:
+            legs = [(ts, pnl) for ts, prod, pnl in closed_legs
+                    if prod == product and ts >= window_starts[d]]
+            if not legs:
+                continue
+            per_window[f"{d}d"] = {
+                "pnl": round(sum(pnl for _ts, pnl in legs), 2),
+                "closed": len(legs),
+                "realized_drawdown": round(realized_drawdown(legs), 2),
+            }
+        if per_window:
+            out[product] = per_window
+    return out
 
 
 def _benchmark(
