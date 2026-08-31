@@ -458,3 +458,72 @@ def test_real_status_payload_covers_every_decision():
     covered = sum(m["samples"] for m in prox["metrics"].values())
     expected = sum(len(d.get("thresholds") or {}) for d in payload["decisions"])
     assert covered == expected
+
+
+# --- per-asset attribution (issue #51) -------------------------------------
+#
+# Portfolio P&L answers "how did we do" and cannot answer "which asset is
+# costing us" — a book that is flat overall can be one asset bleeding into
+# another one carrying it.
+
+def test_realized_drawdown_is_dollars_not_a_fraction():
+    # bot.metrics.max_drawdown returns equity/peak - 1, which needs a positive
+    # base. A cumulative P&L curve starts at zero and can sit negative, where
+    # that formula divides by zero or flips sign. This one is absolute.
+    legs = [(1.0, 100.0), (2.0, -30.0), (3.0, -20.0), (4.0, 60.0)]
+    # cumulative: 100, 70, 50, 110 -> peak 100, trough 50
+    assert write_status.realized_drawdown(legs) == -50.0
+
+
+def test_realized_drawdown_handles_a_book_that_never_wins():
+    # Starts at zero and only falls: peak stays 0, so the drawdown is the whole
+    # loss. The fractional formula would divide by a peak of 0 here.
+    assert write_status.realized_drawdown([(1.0, -10.0), (2.0, -5.0)]) == -15.0
+    assert write_status.realized_drawdown([]) == 0.0
+    assert write_status.realized_drawdown([(1.0, 5.0), (2.0, 5.0)]) == 0.0
+
+
+def test_realized_drawdown_sorts_before_walking():
+    # Store-ordered rows must not produce a different answer from time-ordered
+    # ones — a caller shouldn't be able to get a subtly wrong number for free.
+    ordered = [(1.0, 100.0), (2.0, -80.0), (3.0, 40.0)]
+    shuffled = [ordered[2], ordered[0], ordered[1]]
+    assert write_status.realized_drawdown(shuffled) == write_status.realized_drawdown(ordered)
+    assert write_status.realized_drawdown(ordered) == -80.0
+
+
+def test_attribution_splits_pnl_by_asset_and_window():
+    now = 1_700_000_000.0
+    day = 86_400
+    windows = (7, 30, 90)
+    starts = {d: now - d * day for d in windows}
+    legs = [
+        (now - 2 * day,  "BTC-USD", 100.0),   # in every window
+        (now - 40 * day, "BTC-USD", -250.0),  # 90d only
+        (now - 1 * day,  "ETH-USD", -60.0),
+    ]
+    out = write_status.attribution(legs, starts, windows)
+
+    assert out["BTC-USD"]["7d"]["pnl"] == 100.0
+    assert out["BTC-USD"]["90d"]["pnl"] == -150.0
+    assert out["BTC-USD"]["90d"]["closed"] == 2
+    # The winner over 7d is the loser over 90d — the whole point of the split.
+    assert out["ETH-USD"]["7d"]["pnl"] == -60.0
+    # A window with no closed trade for an asset is absent, not zero.
+    assert "7d" in out["ETH-USD"] and out["ETH-USD"]["7d"]["closed"] == 1
+
+
+def test_attribution_omits_assets_with_nothing_closed():
+    # A symbol the strategy never closed is not a flat performer, and reporting
+    # it as 0.00 would put it in a table next to real results.
+    assert write_status.attribution([], {7: 0.0}, (7,)) == {}
+
+
+def test_attribution_reaches_the_status_file(tmp_path):
+    now = 1_700_000_000.0
+    _store_in(str(tmp_path), now)
+    status = write_status.collect_metrics(now)
+    assert "attribution" in status, "per-asset breakdown missing from the status file"
+    for per_window in status["attribution"].values():
+        for row in per_window.values():
+            assert set(row) == {"pnl", "closed", "realized_drawdown"}
