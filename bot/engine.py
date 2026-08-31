@@ -262,6 +262,15 @@ class Engine:
                     "skipping equity snapshot: no fresh price for open position(s) %s",
                     unpriced,
                 )
+                # A skipped snapshot leaves the merged equity curve flat across
+                # this store's ticks with no distinguishing signal (issue #50:
+                # a 25h price freeze read as "equity didn't move" instead of
+                # "we couldn't price it"). Persist it so overseer status can
+                # report it as a fault; cleared the moment pricing recovers.
+                self.storage.set_meta("last_equity_skip_at", str(time.time()))
+                self.storage.set_meta(
+                    "last_equity_skip_products", ",".join(unpriced)
+                )
             else:
                 current_equity = self.portfolio.total_equity(prices)
                 self.storage.save_equity(
@@ -269,6 +278,7 @@ class Engine:
                     self.portfolio.market_value(prices),
                     current_equity,
                 )
+                self.storage.set_meta("last_equity_skip_at", "")
                 self._maybe_notify_new_high(current_equity)
             self.storage.export_state(
                 self.config.dashboard_state_path,

@@ -307,6 +307,34 @@ def test_missing_store_is_an_error(tmp_path):
     assert status["signals_acted"] == 0
 
 
+def test_stale_equity_skip_is_surfaced_as_an_error(tmp_path):
+    # engine.tick() persists last_equity_skip_at/_products when it skips a
+    # snapshot for lack of a fresh price (bot/engine.py); until a later tick
+    # snapshots successfully and clears it, that store's contribution to the
+    # merged equity curve is flatlining with no other signal of why (issue
+    # #50 — a 25h price freeze that read as a quiet market, not a fault).
+    now = 1_700_000_000.0
+    _store_in(str(tmp_path), now)
+    s = Storage(os.path.join(str(tmp_path), "trading.test.db"))
+    s.set_meta("last_equity_skip_at", str(now - 60))
+    s.set_meta("last_equity_skip_products", "ETH-USD")
+    s.close()
+
+    status = write_status.collect_metrics(now)
+    assert any("ETH-USD" in e and "stale" in e for e in status["errors"])
+
+
+def test_cleared_equity_skip_is_not_surfaced(tmp_path):
+    now = 1_700_000_000.0
+    _store_in(str(tmp_path), now)
+    s = Storage(os.path.join(str(tmp_path), "trading.test.db"))
+    s.set_meta("last_equity_skip_at", "")
+    s.close()
+
+    status = write_status.collect_metrics(now)
+    assert status["errors"] == []
+
+
 # --- signal proximity: quiet market vs tight thresholds (issue #38) ---------
 
 def _dec(thresholds, reject_code="no_signal"):

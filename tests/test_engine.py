@@ -308,7 +308,13 @@ def test_equity_snapshot_skipped_when_open_position_unpriced():
     eng.market_data = FailingMarketData(candles, failing_product="ETH-USD")
     eng.tick()
     assert rec.equity_snapshots == [], "snapshot with an unpriced open position"
+    # The skip must be persisted (issue #50): otherwise a store stuck here
+    # for hours reads downstream as "equity didn't move" instead of "we
+    # couldn't price the position".
+    assert rec.get_meta("last_equity_skip_at")
+    assert rec.get_meta("last_equity_skip_products") == "ETH-USD"
 
     eng.market_data = FakeMarketData(candles)  # both products price fine now
     eng.tick()
     assert len(rec.equity_snapshots) == 1
+    assert rec.get_meta("last_equity_skip_at") == ""
