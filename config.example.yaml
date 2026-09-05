@@ -148,6 +148,20 @@ fallback_stop_pct: 0.08      # stop distance when ATR isn't available
 # 0 disables (default): behavior is exactly as before. Overridable per account.
 reentry_cooldown_bars: 0
 
+# Transaction-cost gate: don't take a trade whose projected move can't pay for
+# the round trip. The cost of a round trip is 2 x fee_rate plus twice the median
+# slippage of this product's recent fills (logged per fill in signal_log); the
+# projected move is the take-profit distance the trade would be managed toward
+# (take_profit_atr_mult x ATR). An entry is allowed only when
+#   projected move >= round-trip cost x cost_floor_margin.
+# The measurement runs every tick either way and is written to the signal log
+# (features.cost_floor), so the gate's effect is readable before it is switched
+# on. Disabled by default; rejections show up as `below_cost_floor`. Exits and
+# protective stops are never gated. Overridable per account.
+cost_floor_enabled: false
+cost_floor_margin: 1.5       # required edge as a multiple of round-trip cost
+cost_floor_samples: 20       # recent per-fill slippage samples behind the estimate
+
 # Cross-account portfolio guard. The combined gross exposure of ALL accounts
 # is computed and logged every tick regardless; enabling the guard makes it
 # also VETO any new entry that would push combined gross exposure above

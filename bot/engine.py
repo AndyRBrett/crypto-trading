@@ -21,7 +21,7 @@ from .market_data import _GRANULARITY_SECONDS, MarketData, closed_candles
 from .notifier import Notifier
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
 from .publish import Publisher
-from . import risk
+from . import costs, risk
 from .sentiment import SentimentAnalyzer
 from .storage import Storage
 from .strategies import make_strategy
@@ -42,10 +42,11 @@ SIZE_ZERO = "size_zero"            # BUY sized to ~0 by risk limits / dust floor
 INSUFFICIENT_BALANCE = "insufficient_balance"  # BUY rejected: not enough cash
 REENTRY_COOLDOWN = "reentry_cooldown"  # entry blocked: too soon after a stop-out
 PORTFOLIO_EXPOSURE = "portfolio_exposure"  # entry vetoed: combined gross over cap
+BELOW_COST_FLOOR = "below_cost_floor"  # entry vetoed: projected move < round-trip cost
 # reject_codes that mean "we wanted to BUY but couldn't" vs. "no actionable signal".
 _REJECTED_CODES = frozenset(
     {MAX_OPEN_POSITIONS, SIZE_ZERO, INSUFFICIENT_BALANCE, REENTRY_COOLDOWN,
-     PORTFOLIO_EXPOSURE}
+     PORTFOLIO_EXPOSURE, BELOW_COST_FLOOR}
 )
 
 
@@ -94,6 +95,9 @@ class Engine:
             config.starting_cash, config.fee_rate, trades
         )
         self.latest_signals: dict = {}
+        # Last cost-floor measurement per product (issue #44), attached to the
+        # signal log so the gate's effect is readable before it's switched on.
+        self._cost_floor: dict = {}
         # Last tick's market snapshot, surfaced for the multi-account Runner's
         # combined dashboard export.
         self.last_prices: dict = {}
@@ -231,6 +235,12 @@ class Engine:
                 "thresholds": signal.thresholds,
                 "strength": signal.strength,
             }
+            # Edge-vs-cost economics for this signal, when an entry was on the
+            # table: what the trade projected, what the round trip costs, and
+            # what it needed to clear (issue #44).
+            cost_floor = self._cost_floor.pop(product_id, None)
+            if cost_floor is not None:
+                features["cost_floor"] = cost_floor
             try:
                 self.storage.save_signal(
                     time.time(), product_id, signal.action, price,
@@ -341,6 +351,8 @@ class Engine:
             if self._at_max_positions():
                 log.info("%s: at max open positions, skipping BUY", product_id)
                 return None, MAX_OPEN_POSITIONS
+            if self._below_cost_floor(product_id, price, atr):
+                return None, BELOW_COST_FLOOR
             qty = self._position_size(price, atr, prices)
             if qty <= 0:
                 log.info("%s: position size ~0 after risk limits, skipping BUY", product_id)
@@ -358,6 +370,8 @@ class Engine:
             if self._at_max_positions():
                 log.info("%s: at max open positions, skipping SHORT", product_id)
                 return None, MAX_OPEN_POSITIONS
+            if self._below_cost_floor(product_id, price, atr):
+                return None, BELOW_COST_FLOOR
             qty = self._position_size(price, atr, prices, direction="short")
             if qty <= 0:
                 log.info("%s: short size ~0 after risk limits, skipping", product_id)
@@ -381,6 +395,34 @@ class Engine:
         if not ok:
             log.info("%s: portfolio guard vetoed entry — %s", product_id, why)
         return not ok
+
+    def _below_cost_floor(self, product_id: str, price: float, atr) -> bool:
+        """True when this entry's projected move doesn't clear its round-trip cost.
+
+        Prices the round trip from the product's own recent fills (2 x fee_rate
+        plus twice the median logged slippage) and compares it to the take-profit
+        distance the trade would be managed toward, times ``cost_floor_margin``
+        (issue #44). The measurement runs on every entry candidate either way and
+        is stashed for the signal log; only ``cost_floor_enabled`` lets it veto.
+        Never consulted on an exit — an open position must always be able to close.
+        """
+        samples: list = []
+        reader = getattr(self.storage, "recent_slippage_bps", None)
+        if reader is not None:
+            try:
+                samples = reader(product_id, self.config.cost_floor_samples)
+            except Exception as exc:  # a cost estimate is never worth a failed tick
+                log.warning("could not read slippage history for %s: %s", product_id, exc)
+        verdict = costs.cost_floor_verdict(self.config, price, atr, samples)
+        self._cost_floor[product_id] = verdict
+        if verdict["blocked"]:
+            log.info(
+                "%s: below cost floor — projected %.0f bps < required %.0f bps "
+                "(round-trip cost %.0f bps from %d fill(s)), skipping entry",
+                product_id, verdict["edge_bps"], verdict["required_bps"],
+                verdict["cost_bps"], verdict["samples"],
+            )
+        return verdict["blocked"]
 
     def _in_reentry_cooldown(self, product_id: str) -> bool:
         """True while new entries in this product are blocked after a stop-out.

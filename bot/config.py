@@ -50,6 +50,9 @@ class AccountConfig:
     fallback_stop_pct: float | None = None
     allow_short: bool | None = None  # enable short selling for this account
     reentry_cooldown_bars: int | None = None  # bars to wait after a stop-out
+    cost_floor_enabled: bool | None = None  # gate entries on edge vs. round-trip cost
+    cost_floor_margin: float | None = None  # required edge as a multiple of that cost
+    cost_floor_samples: int | None = None   # slippage samples behind the cost estimate
 
     def resolved_db_path(self) -> str:
         return self.db_path or f"trading.{_sanitize_name(self.name)}.db"
@@ -115,6 +118,18 @@ class Config:
     # observed live as a stop-out re-shorted 2h later at a worse price).
     # 0 = disabled (default): behavior is exactly as before.
     reentry_cooldown_bars: int = 0
+
+    # Transaction-cost gate (bot/costs.py, issue #44). Every entry is measured
+    # against the round-trip cost of trading it — 2 x fee_rate plus twice the
+    # median recent slippage — and the projected move (the take-profit distance
+    # the trade is managed toward) must cover that cost times
+    # ``cost_floor_margin``. The measurement always runs and is written to the
+    # signal log; only ``cost_floor_enabled`` makes it veto an entry (reject_code
+    # ``below_cost_floor``). Exits are never gated: a position already open must
+    # always be able to close.
+    cost_floor_enabled: bool = False
+    cost_floor_margin: float = 1.5
+    cost_floor_samples: int = 20  # most recent per-fill slippage samples used
 
     # Cross-account portfolio guard (bot/portfolio_guard.py). The combined
     # gross exposure across ALL accounts is always computed and logged; when

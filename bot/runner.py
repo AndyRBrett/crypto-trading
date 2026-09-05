@@ -147,6 +147,9 @@ class Runner:
             fallback_stop_pct=pick(acct.fallback_stop_pct, base.fallback_stop_pct),
             allow_short=pick(acct.allow_short, base.allow_short),
             reentry_cooldown_bars=pick(acct.reentry_cooldown_bars, base.reentry_cooldown_bars),
+            cost_floor_enabled=pick(acct.cost_floor_enabled, base.cost_floor_enabled),
+            cost_floor_margin=pick(acct.cost_floor_margin, base.cost_floor_margin),
+            cost_floor_samples=pick(acct.cost_floor_samples, base.cost_floor_samples),
             # The Runner publishes/coordinates once per tick, not per engine.
             publish_enabled=False,
             coordinate_enabled=False,

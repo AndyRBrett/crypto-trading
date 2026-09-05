@@ -1,7 +1,8 @@
 # Enabling the opt-in features (paper mode checklist)
 
 Three features shipped from the 2026-07 audit-and-enhance sessions
-(PR #29). **All three are OFF by default** — the five live paper accounts
+(PR #29), joined later by the transaction-cost gate (#4 below).
+**All of them are OFF by default** — the five live paper accounts
 behave exactly as before until you flip a flag in `config.ci.yaml` (cloud)
 or `config.yaml` (local). This file is the enable-later checklist: what each
 flag does, what has been verified, what has NOT, and a suggested order.
@@ -117,6 +118,50 @@ loser.
       positive over 90 bars — in the current bear tape it would sit in cash.
 - [ ] Judge it against `regime` on the dashboard comparison table: rotation
       must beat regime (its closest cousin) risk-adjusted to earn its slot.
+
+---
+
+## 4. `cost_floor_enabled` — transaction-cost gate (issue #44)
+
+**What it does.** Before any NEW entry, compares the move the trade would be
+managed toward (`take_profit_atr_mult` × ATR) against the cost of the round
+trip (2 × `fee_rate` + twice the median slippage of that product's recent
+fills). The entry is allowed only when the projected move covers that cost ×
+`cost_floor_margin` (default 1.5). Rejections show up as `below_cost_floor`.
+**Exits, covers, and protective stops are never gated.**
+
+**Why it exists.** 7-day and 90-day P&L were both negative (−$25 / −$793,
+Sharpe −2.29) on only 1–6 fills per window — the shape of a book whose few
+signals never cleared their own costs. At the 0.6% taker fee a round trip
+starts at 120 bps before any slippage; a 100 bps target is a losing trade on
+arrival.
+
+**Verified.**
+- Unit tests pin the cost math (round trip counts both legs; the median uses
+  slippage *magnitude*, so one abnormal fill can't move the floor; empty
+  history degrades to fees-only rather than to zero cost).
+- Engine tests: an entry under the floor is rejected with `below_cost_floor`,
+  the same signal trades normally with the gate off or with a wider ATR,
+  shorts are gated the same way, and a SELL closing an open long still
+  executes while the floor would have blocked opening it.
+- The backtester applies the identical gate, so the margin's historical effect
+  is measurable once exchange data is reachable.
+
+**Not verified.** The `cost_floor_margin` *value* is untuned — 1.5 is a
+judgement call, not a backtested optimum, and tuning it needs the network
+allowlist below. Measure first: the gate writes `features.cost_floor`
+(`edge_bps` / `cost_bps` / `required_bps` / `samples`) to the signal log on
+every entry candidate whether or not it is enabled.
+
+**Suggested enablement (measure first, then flip).**
+- [ ] Leave it off for a week and read `features.cost_floor` in the activity
+      log: how many entries would have been blocked, and at what margin.
+- [ ] If the blocked set is dominated by the losers, set
+      `cost_floor_enabled: true` in `config.ci.yaml` with the default margin.
+- [ ] After a week+: check `rejection_reasons.below_cost_floor` in
+      `overseer-status.json`. A very large count on one account means that
+      strategy's targets are structurally too tight for the fee — a strategy
+      problem the gate is surfacing, not causing.
 
 ---
 
