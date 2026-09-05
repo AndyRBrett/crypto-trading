@@ -371,6 +371,8 @@ commented list). Highlights:
   entries while trailing risk-adjusted performance stays negative (see below).
 - `max_hold_days`, `max_hold_min_gain_pct` — the position aging cap: rotate a
   stale holding out so it stops blocking fresh signals (see below).
+- `vol_target_enabled`, `vol_target_pct`, `vol_lookback_bars` — volatility-
+  targeted sizing: bound a position by its vol contribution (see below).
 - `data_source` — `public` or `coinbase_advanced`.
 
 ### Transaction-cost gate (`cost_floor_*`)
@@ -395,6 +397,34 @@ before enabling it. With `cost_floor_enabled: true` a failing entry is skipped
 and logged with `reject_code: below_cost_floor`. Exits, covers, and protective
 stops are never gated — an open position can always close. The backtester
 applies the identical gate, so a sweep measures the live rule.
+
+### Volatility-targeted sizing (`vol_target_*`)
+
+Sizing already divides by ATR — but that only tracks volatility while the risk
+bound is the binding one, and at live settings it often isn't. With a $50k book,
+1% risk and a 2-ATR stop, a 1.5%-ATR asset sizes to a $16.7k risk bound against
+a $15k equity cap: the flat `max_position_pct` wins and two assets at very
+different volatility take the same notional.
+
+Enabling vol targeting adds one more bound — the notional whose expected
+annualized volatility contribution is `vol_target_pct` of equity:
+
+    notional = equity × vol_target_pct ÷ annualized_vol(asset)
+
+Volatility is the standard deviation of the last `vol_lookback_bars` returns,
+annualized on the same 365-day 24/7 convention `risk_metrics` uses (so the
+numbers are comparable), measured on **closed** candles only. When there isn't
+enough close history it falls back to `ATR / price` as the per-bar move; a true
+range runs wider than a standard deviation, so that estimate reads high and
+sizes *smaller* — the safe direction for a fallback. If neither is measurable
+there is no bound and sizing behaves exactly as before; an unmeasurable
+volatility is never treated as zero, which would divide into an unbounded size.
+
+The bound only ever **reduces** a position. A strict vol-target would size up
+through `max_position_pct` in calm regimes, and a book that does that is the one
+that gets hurt when a quiet regime ends — so the equity cap stays the backstop
+and the vol bound tightens sizing in the volatile regimes where that cap is too
+generous. Disabled by default; the backtester applies the same bound.
 
 ### Position aging cap (`max_hold_days`)
 

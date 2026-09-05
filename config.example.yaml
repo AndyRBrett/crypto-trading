@@ -148,6 +148,21 @@ fallback_stop_pct: 0.08      # stop distance when ATR isn't available
 # 0 disables (default): behavior is exactly as before. Overridable per account.
 reentry_cooldown_bars: 0
 
+# Volatility-targeted sizing. The risk sizer already divides by ATR, but that
+# only tracks volatility while the risk bound is the binding one — at live
+# settings a calm asset often hits the flat `max_position_pct` cap instead, so a
+# wild asset and a calm one take the same notional. This adds one more bound:
+# the notional whose expected annualized volatility contribution is
+# `vol_target_pct` of equity, measured from realized volatility over
+# `vol_lookback_bars` closes (ATR as a fallback estimate, which reads high and
+# therefore sizes smaller — the safe direction). It can only ever REDUCE a
+# position: sizing up through the equity cap in a calm regime is how
+# vol-targeted books get hurt when the regime ends. Disabled by default;
+# overridable per account.
+vol_target_enabled: false
+vol_target_pct: 0.20      # target annualized vol contribution per position
+vol_lookback_bars: 20     # closes behind the realized-vol estimate
+
 # Position aging / rotation cap. A trade that neither stops out nor reaches its
 # target is held forever, and a full book rejects every fresh signal with
 # `in_position` — 8 of 10 decisions in one live week. After `max_hold_days` a

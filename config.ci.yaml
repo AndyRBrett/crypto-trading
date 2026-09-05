@@ -118,6 +118,15 @@ fallback_stop_pct: 0.08
 # whipsaw seen on long_short 2026-07-02).
 reentry_cooldown_bars: 0
 
+# Volatility-targeted sizing: OFF = sizing exactly as before. Enable to bound a
+# new position's notional by its expected annualized volatility contribution
+# (vol_target_pct of equity), so a high-vol asset stops taking the same notional
+# as a calm one just because the flat 30% equity cap allowed it. Only ever
+# reduces size; max_position_pct stays the backstop.
+vol_target_enabled: false
+vol_target_pct: 0.20
+vol_lookback_bars: 20
+
 # Position aging / rotation cap: 0 = off (positions are held until a stop,
 # target, or strategy exit fires). Set to e.g. 21 to close any position held
 # longer than 21 days that isn't up at least max_hold_min_gain_pct, so a stale
