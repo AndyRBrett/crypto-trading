@@ -162,6 +162,24 @@ cost_floor_enabled: false
 cost_floor_margin: 1.5       # required edge as a multiple of round-trip cost
 cost_floor_samples: 20       # recent per-fill slippage samples behind the estimate
 
+# Rolling-risk circuit breaker: de-risk automatically when the strategy keeps
+# losing. Each tick the trailing risk-adjusted metrics (the same Sharpe/Sortino
+# the overseer reports, computed from the persisted equity curve) are evaluated
+# as of each of the last `risk_breaker_days` days; when BOTH ratios sit at or
+# below their floors on every one of those days, new entries are sized at
+# `risk_breaker_size_mult` of normal until the metrics recover. 0.0 pauses new
+# entries entirely (rejections log as `risk_breaker`). Existing positions and
+# every exit — strategy SELL, take-profit, stop — are never touched. The state
+# is recomputed from the curve each tick, so it clears itself on recovery and
+# survives restarts with nothing to persist. Disabled by default; measured and
+# reported either way. Overridable per account.
+risk_breaker_enabled: false
+risk_breaker_days: 3           # consecutive breaching days before it trips
+risk_breaker_size_mult: 0.5    # size while tripped (0.0 = pause new entries)
+risk_breaker_sharpe_floor: -1.5
+risk_breaker_sortino_floor: -1.5
+risk_breaker_window_days: 30   # trailing window each daily reading measures
+
 # Cross-account portfolio guard. The combined gross exposure of ALL accounts
 # is computed and logged every tick regardless; enabling the guard makes it
 # also VETO any new entry that would push combined gross exposure above

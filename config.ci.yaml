@@ -127,6 +127,17 @@ cost_floor_enabled: false
 cost_floor_margin: 1.5
 cost_floor_samples: 20
 
+# Rolling-risk circuit breaker: OFF = no throttle (the state is still computed
+# each tick and reported in overseer-status.json when tripped). Enable to size
+# new entries at risk_breaker_size_mult while trailing Sharpe AND Sortino stay
+# at or below their floors for risk_breaker_days consecutive days; 0.0 pauses
+# entries outright. Clears itself on recovery. Never blocks exits.
+risk_breaker_enabled: false
+risk_breaker_days: 3
+risk_breaker_size_mult: 0.5
+risk_breaker_sharpe_floor: -1.5
+risk_breaker_sortino_floor: -1.5
+
 # Cross-account exposure guard: OFF = read-only (combined gross/net exposure
 # is still computed and logged each tick). Enable to veto new entries that
 # would push combined gross exposure over max_gross_exposure_pct x combined

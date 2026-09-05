@@ -150,6 +150,15 @@ class Runner:
             cost_floor_enabled=pick(acct.cost_floor_enabled, base.cost_floor_enabled),
             cost_floor_margin=pick(acct.cost_floor_margin, base.cost_floor_margin),
             cost_floor_samples=pick(acct.cost_floor_samples, base.cost_floor_samples),
+            risk_breaker_enabled=pick(acct.risk_breaker_enabled, base.risk_breaker_enabled),
+            risk_breaker_days=pick(acct.risk_breaker_days, base.risk_breaker_days),
+            risk_breaker_size_mult=pick(acct.risk_breaker_size_mult, base.risk_breaker_size_mult),
+            risk_breaker_sharpe_floor=pick(
+                acct.risk_breaker_sharpe_floor, base.risk_breaker_sharpe_floor
+            ),
+            risk_breaker_sortino_floor=pick(
+                acct.risk_breaker_sortino_floor, base.risk_breaker_sortino_floor
+            ),
             # The Runner publishes/coordinates once per tick, not per engine.
             publish_enabled=False,
             coordinate_enabled=False,
