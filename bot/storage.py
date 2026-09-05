@@ -24,6 +24,7 @@ def export_combined_state(
     price_history: dict | None = None,
     granularity: str = "",
     vapid_public_key: str = "",
+    portfolio_risk: dict | None = None,
 ) -> None:
     """Write the unified multi-account ``state.json`` the dashboard reads.
 
@@ -82,6 +83,8 @@ def export_combined_state(
         "portfolio_total": total,
         "accounts": account_blocks,
     }
+    if portfolio_risk is not None:
+        state["portfolio_risk"] = portfolio_risk
     if vapid_public_key:
         state["vapid_public_key"] = vapid_public_key
     out = Path(path)

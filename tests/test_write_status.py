@@ -527,8 +527,6 @@ def test_attribution_reaches_the_status_file(tmp_path):
     for per_window in status["attribution"].values():
         for row in per_window.values():
             assert set(row) == {"pnl", "closed", "realized_drawdown"}
-
-
 def test_adaptive_proximity_keeps_baseline_and_atr_out_of_verdict():
     prox = write_status.signal_proximity([_dec({
         'breakout_dist_pct': -2.0, 'raw_breakout_dist_pct': -0.01,
@@ -539,3 +537,15 @@ def test_adaptive_proximity_keeps_baseline_and_atr_out_of_verdict():
     assert prox['verdict'] == 'quiet-market'
     assert prox['metrics']['breakout_dist_atr']['closest'] == 0.1
     assert prox['metrics']['raw_breakout_dist_pct']['closest'] == 0.01
+
+
+def test_portfolio_risk_meta_is_reported_with_freshness(tmp_path, monkeypatch):
+    import json
+    monkeypatch.chdir(tmp_path)
+    store = Storage('trading.test.db')
+    store.set_meta('portfolio_risk', json.dumps({'as_of': 10000, 'effective_beta': .7,
+                                               'clusters': [{'assets': ['BTC-USD', 'ETH-USD']}]}))
+    store.close()
+    fresh = write_status.collect_metrics(10001)['portfolio_risk']
+    assert fresh['effective_beta'] == .7 and fresh['stale'] is False
+    assert write_status.collect_metrics(12000)['portfolio_risk']['stale'] is True

@@ -229,6 +229,7 @@ def collect_metrics(now: float | None = None) -> dict:
     if not db_paths:
         errors.append(f"no trade store found (expected {DB_GLOB})")
 
+    portfolio_risk = None
     read_any = False
     # Per-window accumulators keyed by window length in days.
     fills = {d: 0 for d in windows}    # all fills (BUY+SELL) in the window
@@ -293,6 +294,13 @@ def collect_metrics(now: float | None = None) -> dict:
                 meta = dict(conn.execute("SELECT key, value FROM meta").fetchall())
             except sqlite3.Error:
                 meta = {}
+            try:
+                candidate = json.loads(meta.get("portfolio_risk", "null"))
+                if (isinstance(candidate, dict) and isinstance(candidate.get("as_of"), (int, float))
+                        and (portfolio_risk is None or candidate["as_of"] > portfolio_risk["as_of"])):
+                    portfolio_risk = candidate
+            except (ValueError, TypeError):
+                pass
             if meta.get("last_push_error"):
                 push_errors.add(meta["last_push_error"].splitlines()[0])
             # last_equity_skip_at is cleared the moment a store snapshots
@@ -488,6 +496,10 @@ def collect_metrics(now: float | None = None) -> dict:
     for msg in sorted(equity_skip_warnings):
         errors.append(msg)
     status["errors"] = errors
+    if portfolio_risk is not None:
+        status["portfolio_risk"] = portfolio_risk
+        status["portfolio_risk"]["stale"] = now - portfolio_risk["as_of"] > SIGNAL_RUN_WINDOW
+
     return status
 
 

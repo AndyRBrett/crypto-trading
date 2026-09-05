@@ -185,6 +185,12 @@ class Config:
     # touched). Disabled by default: no behavior change until flipped.
     portfolio_guard_enabled: bool = False
     max_gross_exposure_pct: float = 1.5
+    correlation_guard_enabled: bool = False
+    correlation_lookback: int = 60  # aligned return intervals
+    correlation_min_samples: int = 20
+    correlation_cluster_threshold: float = 0.8
+    max_asset_exposure_pct: float = 0.5
+    max_correlated_exposure_pct: float = 0.8
 
     # Claude trade explanations.
     explanations_enabled: bool = True

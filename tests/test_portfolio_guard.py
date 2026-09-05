@@ -114,3 +114,109 @@ def test_engine_without_guard_behaves_as_before():
     buy = Signal(product_id="ETH-USD", action=BUY, price=100.0, indicators={"atr": 5.0})
     trade, code = eng._manage(buy, 100.0, [], {"ETH-USD": 100.0})
     assert code == ACTED and trade is not None
+
+
+import math
+import pytest
+
+
+def _history(returns, start=100, end=None):
+    end = int(time.time() // 3600) * 3600 - 3600 if end is None else end
+    prices = [start]
+    for r in returns:
+        prices.append(prices[-1] * (1 + r))
+    return [{'time': end - (len(prices) - 1 - i) * 3600, 'close': p}
+            for i, p in enumerate(prices)]
+
+
+def _correlated_guard(returns_b=None):
+    cfg = Config(correlation_guard_enabled=True, correlation_min_samples=4,
+                 correlation_lookback=8, max_asset_exposure_pct=0.6,
+                 max_correlated_exposure_pct=0.65)
+    guard = PortfolioGuard(cfg)
+    p = Portfolio(10000, 0)
+    p.execute(BUY, 'BTC-USD', 100, 40, timestamp=1)
+    guard.register(StubEngine(p, {'BTC-USD': 100}))
+    a = [.01, -.01, .01, -.01] * 2
+    b = a if returns_b is None else returns_b
+    guard.prepare({'BTC-USD': _history(a), 'ETH-USD': _history(b)}, 3600)
+    return guard
+
+
+def test_correlated_entry_blocked_but_diversified_entry_allowed():
+    guard = _correlated_guard()
+    assert guard.allows_entry(3000, {'BTC-USD': 100}, product_id='ETH-USD')[0] is False
+    guard = _correlated_guard([.01, .01, -.01, -.01] * 2)
+    assert guard.allows_entry(3000, {'BTC-USD': 100}, product_id='ETH-USD')[0] is True
+    risk = guard._risk({'BTC-USD': 4000, 'ETH-USD': 3000}, 10000)
+    assert risk['effective_beta'] == pytest.approx(0.5)
+    assert len(risk['clusters']) == 2
+
+
+def test_missing_constant_stale_and_misaligned_data_are_conservative():
+    guard = _correlated_guard()
+    a = _history([.01, -.01] * 4)
+    for b in ([], _history([0] * 8), _history([.01, -.01] * 4, end=100000),
+              [{**c, 'time': c['time'] + 1} for c in a]):
+        guard.prepare({'BTC-USD': a, 'ETH-USD': b}, 3600)
+        rho, _, assumed = guard._correlation('BTC-USD', 'ETH-USD')
+        assert rho == 1 and assumed
+        assert not guard.allows_entry(3000, {'BTC-USD': 100}, product_id='ETH-USD')[0]
+    # New failed fetch clears previously useful history.
+    guard.prepare({}, 3600)
+    assert guard._returns == {}
+
+
+def test_opposite_accounts_do_not_cancel_concentration():
+    guard = _correlated_guard()
+    short = Portfolio(10000, 0)
+    short.execute(SELL, 'BTC-USD', 100, 40, timestamp=1)
+    guard.register(StubEngine(short, {'BTC-USD': 100}))
+    snap = guard.snapshot({'BTC-USD': 100})
+    assert snap['by_asset']['BTC-USD'] == 0
+    assert snap['gross_by_asset']['BTC-USD'] == 8000
+    guard.asset_cap = 0.4
+    ok, reason = guard.allows_entry(1, {'BTC-USD': 100}, product_id='BTC-USD')
+    assert not ok and 'concentration' in reason
+
+
+def test_negative_correlation_has_no_hedge_credit():
+    guard = _correlated_guard([-.01, .01] * 4)
+    risk = guard._risk({'BTC-USD': 4000, 'ETH-USD': 3000}, 10000)
+    assert risk['effective_beta'] == pytest.approx(.7)
+    assert risk['clusters'][0]['assets'] == ['BTC-USD', 'ETH-USD']
+    assert risk['pairs'][0]['correlation'] == pytest.approx(-1)
+
+
+def test_new_fills_consume_capacity_before_next_entry():
+    guard = _correlated_guard()
+    guard.correlated_cap = .8
+    assert guard.allows_entry(3000, {'BTC-USD': 100}, product_id='ETH-USD')[0]
+    guard._engines[0].portfolio.execute(BUY, 'ETH-USD', 100, 30, timestamp=2)
+    assert not guard.allows_entry(2000, {'BTC-USD': 100, 'ETH-USD': 100}, product_id='SOL-USD')[0]
+
+
+def test_engine_short_entry_veto_and_cover_allowed():
+    eng = make_engine(starting_cash=10000, products=['ETH-USD'], allow_short=True)
+    eng.storage = FakeStorage()
+    guard = _correlated_guard()
+    guard.correlated_cap = .1
+    guard.register(eng)
+    eng.portfolio_guard = guard
+    sell = Signal('ETH-USD', SELL, 100, indicators={'atr': 5})
+    trade, code = eng._manage(sell, 100, [], {'ETH-USD': 100})
+    assert trade is None and code == PORTFOLIO_EXPOSURE
+    eng.portfolio.execute(SELL, 'ETH-USD', 100, 1, timestamp=1)
+    buy = Signal('ETH-USD', BUY, 100, indicators={'atr': 5}, reasons=['cover'])
+    trade, code = eng._manage(buy, 100, [], {'ETH-USD': 100})
+    assert trade and code == ACTED
+
+
+@pytest.mark.parametrize('overrides', [
+    {'correlation_min_samples': 1}, {'correlation_lookback': 1.5},
+    {'correlation_min_samples': 61}, {'max_asset_exposure_pct': float('nan')},
+    {'max_correlated_exposure_pct': -1}, {'correlation_cluster_threshold': 1.1},
+])
+def test_invalid_correlation_config_rejected(overrides):
+    with pytest.raises(ValueError):
+        PortfolioGuard(Config(**overrides))

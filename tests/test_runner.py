@@ -157,3 +157,25 @@ def test_runner_cloud_stands_down_when_laptop_active(tmp_path):
     assert md.calls == {}  # no engine ticked
     assert not coord.claimed
     runner.close()
+
+
+def test_runner_prepares_full_universe_before_entries_and_persists_risk(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    runner = Runner(cfg, market_data=CountingMarketData())
+    prepared = []
+    original = runner.portfolio_guard.prepare
+    def prepare(histories, interval):
+        prepared.append(set(histories))
+        original(histories, interval)
+    monkeypatch.setattr(runner.portfolio_guard, 'prepare', prepare)
+    for _, engine in runner.engines:
+        def tick():
+            assert prepared == [{'BTC-USD', 'ETH-USD', 'SOL-USD'}]
+            return []
+        monkeypatch.setattr(engine, 'tick', tick)
+    runner.tick()
+    state = json.loads((tmp_path / 'state.json').read_text())
+    saved = json.loads(runner.engines[0][1].storage.get_meta('portfolio_risk'))
+    assert state['portfolio_risk']['as_of'] == saved['as_of']
+    assert 'effective_beta' in saved and 'clusters' in saved
+    runner.close()
