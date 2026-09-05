@@ -52,6 +52,13 @@ accounts:
     strategy_type: donchian_breakout
     products: [ETH-USD, SOL-USD]
     starting_cash: 10000
+    strategy:
+      # Issue #41: prior-close +/- prior-ATR bands tighten in quiet markets and
+      # widen in volatile ones. Start at one ATR on each side; review the raw
+      # versus normalized proximity telemetry before tuning these multipliers.
+      adaptive_breakout: true
+      breakout_atr_mult: 1.0
+      exit_atr_mult: 1.0
 
   # Symmetric trend follower that can SHORT confirmed downtrends — the only
   # sleeve that can make money while the market falls (instead of sitting in
@@ -171,6 +178,17 @@ risk_breaker_sortino_floor: -1.5
 # equity across all five accounts. Never blocks exits.
 portfolio_guard_enabled: false
 max_gross_exposure_pct: 1.5
+
+# Correlation/concentration guard (#42): cap a single asset at 50% of combined
+# equity and correlation-adjusted gross exposure at 80%. Missing or stale
+# return history receives no diversification credit. Long and short entries
+# count positively; exits and protective stops are always allowed.
+correlation_guard_enabled: true
+correlation_lookback: 60
+correlation_min_samples: 20
+correlation_cluster_threshold: 0.8
+max_asset_exposure_pct: 0.5
+max_correlated_exposure_pct: 0.8
 
 # News sentiment (needs the ANTHROPIC_API_KEY Actions secret; safe no-op without).
 # When the secret is missing the bot logs a warning each tick and reports it in
