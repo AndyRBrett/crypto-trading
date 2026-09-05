@@ -110,6 +110,10 @@ def run_backtest(
                 if "high" in c and (opened is None or c.get("time", 0) >= opened)
             ]
             reason = risk.protective_exit_reason(config, pos.avg_price, price, atr, highs)
+            if reason is None:
+                reason = risk.aging_exit_reason(
+                    config, opened, ts, pos.avg_price, price, "long"
+                )
             if reason is None and signal.action == SELL:
                 reason = "; ".join(signal.reasons)
             if reason:
@@ -125,6 +129,10 @@ def run_backtest(
             reason = risk.protective_exit_reason(
                 config, pos.avg_price, price, atr, lows_since_entry=lows, direction="short"
             )
+            if reason is None:
+                reason = risk.aging_exit_reason(
+                    config, opened, ts, pos.avg_price, price, "short"
+                )
             if reason is None and signal.action == BUY:
                 reason = "; ".join(signal.reasons)
             if reason:

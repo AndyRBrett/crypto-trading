@@ -35,6 +35,10 @@ Two further enrichments turn raw numbers into evaluable signal:
   Each ``hold``/``rejected`` decision also carries the signed ``thresholds`` it
   logged — how close that signal came to firing — so "6/6 no_signal" is no longer
   an opaque gap.
+* ``exit_reasons`` (issue #52): how the window's round trips actually ended —
+  ``stop_loss`` / ``take_profit`` / ``position_aging`` / ``strategy_exit``. The
+  counterpart to ``rejection_reasons``: one says why nothing could be entered,
+  the other says what freed a slot.
 * ``risk_breaker`` (issue #45): the accounts whose rolling-risk circuit breaker is
   currently throttling new entries, and when each tripped. Present only while at
   least one account is throttled, so its absence means the whole book is sizing
@@ -57,6 +61,7 @@ from datetime import datetime, timezone
 
 from bot.metrics import RISK_WINDOW_DAYS, risk_metrics
 from bot.portfolio import Portfolio, Trade, closing_legs
+from bot.risk import STOP_REASON_PREFIX
 
 WINDOW_DAYS = 7
 # Longer windows reported alongside the headline 7-day metrics (issue #20).
@@ -77,6 +82,33 @@ SIGNAL_RUN_WINDOW = 900  # seconds (15 min)
 # Cap the rolling equity curve so the status file stays small; the series is
 # downsampled to at most this many points across the headline window.
 MAX_EQUITY_POINTS = 48
+
+
+def _reasons(raw) -> list[str]:
+    """The stored ``reasons`` JSON column as a list; [] for anything unreadable."""
+    try:
+        parsed = json.loads(raw) if raw else []
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _exit_kind(reasons: list[str]) -> str:
+    """Classify a closing leg by its recorded reason.
+
+    The engine writes the exit reason it acted on, and the prefixes are stable
+    contracts (``bot/risk.py``): a stop-out, a take-profit, an aged-out rotation
+    (issue #52), or the strategy's own SELL/cover. Anything unrecognized is
+    reported as ``other`` rather than silently folded into one of the buckets.
+    """
+    first = (reasons[0] if reasons else "") or ""
+    if first.startswith(STOP_REASON_PREFIX):
+        return "stop_loss"
+    if first.startswith("Take-profit"):
+        return "take_profit"
+    if first.startswith("Position aging"):
+        return "position_aging"
+    return "strategy_exit" if first else "other"
 
 
 def _account_name(db_path: str) -> str:
@@ -190,6 +222,7 @@ def collect_metrics(now: float | None = None) -> dict:
     config_warnings: set[str] = set()  # settings enabled but inert (missing secret)
     equity_skip_warnings: set[str] = set()  # stores currently stuck on a stale equity snapshot
     breaker_tripped: dict[str, float | None] = {}  # accounts currently throttled (issue #45)
+    exit_kinds: dict[str, int] = {}  # how the window's round trips ended (issue #52)
     last_notify: float | None = None   # most recent successful push, any account
 
     db_paths = sorted(glob.glob(DB_GLOB))
@@ -232,7 +265,7 @@ def collect_metrics(now: float | None = None) -> dict:
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                "SELECT timestamp, product_id, side, price, quantity, fee "
+                "SELECT timestamp, product_id, side, price, quantity, fee, reasons "
                 "FROM trades"
             ).fetchall()
             try:
@@ -323,6 +356,7 @@ def collect_metrics(now: float | None = None) -> dict:
                     quantity=r["quantity"],
                     fee=r["fee"],
                     cash_after=0.0,
+                    reasons=_reasons(r["reasons"]),
                 )
                 for r in rows
             ],
@@ -335,6 +369,12 @@ def collect_metrics(now: float | None = None) -> dict:
             # A fill in the run window is a signal that was acted on this run.
             if ts >= run_since:
                 signals_acted += 1
+            if ts >= head_start and id(t) in closers:
+                # How each round trip ended. `in_position` rejections say the
+                # book was full; this says what finally emptied a slot — a stop,
+                # a target, the strategy, or the aging cap (issue #52).
+                kind = _exit_kind(t.reasons)
+                exit_kinds[kind] = exit_kinds.get(kind, 0) + 1
             if ts >= head_start:
                 # Every fill is also a mark for the benchmark, and opening legs
                 # (long entries and short entries alike) are the capital the
@@ -407,6 +447,8 @@ def collect_metrics(now: float | None = None) -> dict:
         risk = risk_metrics(risk_curve, now=now)
         if risk:
             status["risk_metrics"] = risk
+    if exit_kinds:
+        status["exit_reasons"] = dict(sorted(exit_kinds.items()))
     if breaker_tripped:
         status["risk_breaker"] = {
             "tripped_accounts": sorted(breaker_tripped),

@@ -159,6 +159,10 @@ class Runner:
             risk_breaker_sortino_floor=pick(
                 acct.risk_breaker_sortino_floor, base.risk_breaker_sortino_floor
             ),
+            max_hold_days=pick(acct.max_hold_days, base.max_hold_days),
+            max_hold_min_gain_pct=pick(
+                acct.max_hold_min_gain_pct, base.max_hold_min_gain_pct
+            ),
             # The Runner publishes/coordinates once per tick, not per engine.
             publish_enabled=False,
             coordinate_enabled=False,

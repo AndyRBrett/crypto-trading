@@ -51,6 +51,57 @@ def reentry_cooldown_active(
     return (now - last.timestamp) < bars * bar_seconds
 
 
+def aging_exit_reason(
+    cfg,
+    opened_at: float | None,
+    now: float,
+    entry: float,
+    price: float,
+    direction: str = "long",
+) -> str | None:
+    """Close a position that has been held too long without going anywhere.
+
+    Issue #52: 8 of 10 decisions in a week were rejected ``in_position`` while
+    BUY signals fired repeatedly on BTC and ETH — the book was full of positions
+    entered long ago and going nowhere, so fresh signals had no capital and no
+    slot. A stop only fires when a trade goes *against* you and a target only
+    when it goes for you; a trade that does neither is held forever.
+
+    A position is closed when it has been open for more than ``max_hold_days``
+    **and** it is not carrying at least ``max_hold_min_gain_pct`` of unrealized
+    gain. The gain condition is what keeps this from cutting winners: a position
+    that is working is left to the trailing stop, which is the mechanism that
+    exists to ride it. Direction-aware — a short gains as price falls.
+
+    The reprieve threshold is a *meaningful* gain (2% by default), not merely
+    "green": a position up 0.5% after a month is the going-nowhere hold this cap
+    exists to rotate out, and a 0% threshold would let it keep its slot forever.
+    Set the threshold high (e.g. 99) to rotate every aged position out
+    regardless of how well it is doing.
+
+    Disabled by default (``max_hold_days = 0``), so behavior is unchanged until
+    it is configured. The reason deliberately does not start with
+    ``STOP_REASON_PREFIX``: an aged-out exit is not a stop-out and must not start
+    a post-stop re-entry cooldown, or the freed capital couldn't be redeployed.
+    """
+    max_days = float(getattr(cfg, "max_hold_days", 0) or 0)
+    if max_days <= 0 or opened_at is None or entry <= 0:
+        return None
+    held_days = (now - opened_at) / 86_400
+    if held_days <= max_days:
+        return None
+    gain = (price - entry) / entry if direction == "long" else (entry - price) / entry
+    floor = float(getattr(cfg, "max_hold_min_gain_pct", 0.0) or 0.0)
+    if gain >= floor:
+        return None
+    side = "short" if direction == "short" else "long"
+    return (
+        f"Position aging: {side} held {held_days:.1f} days (limit {max_days:g}) "
+        f"at {gain * 100:+.2f}% unrealized — below the {floor * 100:+.2f}% "
+        f"keep-holding threshold, rotating the capital out."
+    )
+
+
 def position_size(
     cfg,
     equity: float,

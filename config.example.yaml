@@ -148,6 +148,19 @@ fallback_stop_pct: 0.08      # stop distance when ATR isn't available
 # 0 disables (default): behavior is exactly as before. Overridable per account.
 reentry_cooldown_bars: 0
 
+# Position aging / rotation cap. A trade that neither stops out nor reaches its
+# target is held forever, and a full book rejects every fresh signal with
+# `in_position` — 8 of 10 decisions in one live week. After `max_hold_days` a
+# position is closed unless it is carrying at least `max_hold_min_gain_pct`
+# unrealized gain, so a working position is still left to the trailing stop
+# while a going-nowhere one gives its slot back. The threshold is a meaningful
+# gain, not merely "green" (+0.5% after a month is exactly the stale hold this
+# targets); set it very high to rotate every aged position out regardless.
+# 0 days disables it (default). Exits are logged as `Position aging: ...` and
+# tallied in overseer-status.json under `exit_reasons`. Overridable per account.
+max_hold_days: 0
+max_hold_min_gain_pct: 0.02
+
 # Transaction-cost gate: don't take a trade whose projected move can't pay for
 # the round trip. The cost of a round trip is 2 x fee_rate plus twice the median
 # slippage of this product's recent fills (logged per fill in signal_log); the
