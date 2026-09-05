@@ -118,6 +118,13 @@ fallback_stop_pct: 0.08
 # whipsaw seen on long_short 2026-07-02).
 reentry_cooldown_bars: 0
 
+# Position aging / rotation cap: 0 = off (positions are held until a stop,
+# target, or strategy exit fires). Set to e.g. 21 to close any position held
+# longer than 21 days that isn't up at least max_hold_min_gain_pct, so a stale
+# hold stops blocking fresh signals with `in_position`.
+max_hold_days: 0
+max_hold_min_gain_pct: 0.02
+
 # Transaction-cost gate: OFF = measure only (every entry candidate's projected
 # move, its round-trip cost, and the gap between them are written to the signal
 # log's features.cost_floor). Enable to veto entries whose take-profit distance

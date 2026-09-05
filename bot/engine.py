@@ -509,26 +509,38 @@ class Engine:
         return open_count >= self.config.max_open_positions
 
     def _protective_exit(self, product_id, pos, price, atr, candles):
-        """Return an exit reason if a stop/target/trailing level is breached.
+        """Return an exit reason if a stop/target/trailing level is breached, or
+        if the position has aged out without going anywhere (issue #52).
 
         Direction is read from the position's sign: a short trails the lowest low
-        since entry and stops out *above* entry, the mirror of a long.
+        since entry and stops out *above* entry, the mirror of a long. Stops and
+        targets are checked first — an aging exit is the fallback for a trade
+        that triggers neither, never a reason to pre-empt one that does.
         """
         opened = self.portfolio.opened_at(product_id)
+        direction = "short" if pos.quantity < 0 else "long"
         if pos.quantity < 0:
             lows = [
                 c["low"] for c in candles
                 if "low" in c and (opened is None or c.get("time", 0) >= opened)
             ]
-            return risk.protective_exit_reason(
+            reason = risk.protective_exit_reason(
                 self.config, pos.avg_price, price, atr,
                 lows_since_entry=lows, direction="short",
             )
-        highs = [
-            c["high"] for c in candles
-            if "high" in c and (opened is None or c.get("time", 0) >= opened)
-        ]
-        return risk.protective_exit_reason(self.config, pos.avg_price, price, atr, highs)
+        else:
+            highs = [
+                c["high"] for c in candles
+                if "high" in c and (opened is None or c.get("time", 0) >= opened)
+            ]
+            reason = risk.protective_exit_reason(
+                self.config, pos.avg_price, price, atr, highs
+            )
+        if reason is not None:
+            return reason
+        return risk.aging_exit_reason(
+            self.config, opened, time.time(), pos.avg_price, price, direction
+        )
 
     def _position_size(self, price, atr, prices, direction="long"):
         """Volatility-based size so the stop distance risks ~risk_per_trade_pct.

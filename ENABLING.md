@@ -1,8 +1,8 @@
 # Enabling the opt-in features (paper mode checklist)
 
 Three features shipped from the 2026-07 audit-and-enhance sessions
-(PR #29), joined later by the transaction-cost gate (#4) and the rolling-risk
-circuit breaker (#5).
+(PR #29), joined later by the transaction-cost gate (#4), the rolling-risk
+circuit breaker (#5) and the position aging cap (#6).
 **All of them are OFF by default** — the five live paper accounts
 behave exactly as before until you flip a flag in `config.ci.yaml` (cloud)
 or `config.yaml` (local). This file is the enable-later checklist: what each
@@ -212,6 +212,48 @@ bigger behavioral step).**
       push notification on each trip/recover.
 - [ ] Only move to `0.0` (full pause) if halving proves too slow to stop the
       bleeding — a paused book earns nothing back.
+
+---
+
+## 6. `max_hold_days` — position aging / rotation cap (issue #52)
+
+**What it does.** Closes a position held longer than `max_hold_days` unless it
+is carrying at least `max_hold_min_gain_pct` unrealized gain (2% by default).
+Stops and targets are checked first, so it never pre-empts a real exit, and the
+reason it logs (`Position aging: ...`) is deliberately not a stop-out, so the
+freed capital isn't then blocked by the post-stop re-entry cooldown.
+
+**Why it exists.** 8 of 10 decisions in one live week were rejected
+`in_position` while BUY signals kept firing on BTC and ETH and equity sat
+range-bound with zero trades. A stop fires when a trade goes against you and a
+target when it goes for you; a trade that does neither is held forever, and the
+book stays full.
+
+**Verified.**
+- Unit tests pin the rule: a stale flat position rotates out, a fresh one is
+  untouched, a genuine winner keeps its slot, the gain test inverts correctly
+  for shorts, and the reason never reads as a stop-out.
+- Engine: a stop takes priority over the cap when both apply, shorts age out via
+  a cover, and — the point of the whole thing — a freed slot lets a previously
+  `max_open_positions`-rejected signal trade.
+- Overseer: `exit_reasons` tallies how round trips ended, with unparseable
+  reasons reported as `other` rather than folded into a real bucket.
+- The backtester applies the same cap.
+
+**Not verified.** The right `max_hold_days` for each strategy is untuned and
+needs the network allowlist below. Note the tension worth watching: `regime` and
+`rotation` are *designed* to hold for months, so an aging cap applied to them
+would fight the strategy — prefer a per-account value over a global one.
+
+**Suggested enablement.**
+- [ ] Read `exit_reasons` and the `in_position` share of `rejection_reasons`
+      for a week or two first: if `in_position` isn't dominating rejections,
+      this cap has nothing to fix.
+- [ ] Set `max_hold_days` per account on the tactical sleeves only (leave
+      `regime` / `rotation` at 0), starting generous — e.g. 21 days.
+- [ ] Watch `exit_reasons.position_aging` afterwards. A large count means the
+      strategy is entering trades that go nowhere; the cap is surfacing that,
+      not solving it.
 
 ---
 

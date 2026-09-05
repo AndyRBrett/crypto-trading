@@ -58,6 +58,8 @@ class AccountConfig:
     risk_breaker_size_mult: float | None = None   # size scale while tripped (0 = pause)
     risk_breaker_sharpe_floor: float | None = None
     risk_breaker_sortino_floor: float | None = None
+    max_hold_days: float | None = None        # force-exit a stale position after N days
+    max_hold_min_gain_pct: float | None = None  # unrealized gain that earns a reprieve
 
     def resolved_db_path(self) -> str:
         return self.db_path or f"trading.{_sanitize_name(self.name)}.db"
@@ -150,6 +152,17 @@ class Config:
     risk_breaker_sharpe_floor: float = -1.5
     risk_breaker_sortino_floor: float = -1.5
     risk_breaker_window_days: int = 30
+
+    # Position aging / rotation cap (issue #52). A trade that neither stops out
+    # nor reaches its target is held forever, and a full book rejects every new
+    # signal with ``in_position``. After ``max_hold_days`` a position is closed
+    # unless it is carrying at least ``max_hold_min_gain_pct`` unrealized gain —
+    # a working position is left to the trailing stop, which exists to ride it.
+    # The threshold is a meaningful gain, not merely "green": +0.5% after a
+    # month is the stale hold this cap targets. ``max_hold_days = 0`` disables
+    # the whole thing (default): behavior is exactly as before.
+    max_hold_days: float = 0.0
+    max_hold_min_gain_pct: float = 0.02
 
     # Cross-account portfolio guard (bot/portfolio_guard.py). The combined
     # gross exposure across ALL accounts is always computed and logged; when

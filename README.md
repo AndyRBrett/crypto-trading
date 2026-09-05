@@ -276,6 +276,7 @@ plus 30- and 90-day totals:
                    "thresholds": { "ma_gap_pct": -0.42, "rsi_to_overbought": 21.0,
                                    "price_to_trend_pct": -1.2, "adx_to_min": -5.0 } } ],
   "rejection_reasons": { "no_signal": 3, "size_zero": 1 }, "avg_slippage_bps": 3.1,
+  "exit_reasons": { "stop_loss": 1, "position_aging": 1 },
   "risk_breaker": { "tripped_accounts": ["long_short"],
                     "since": { "long_short": "...Z" } },
   "last_fill_at": null, "last_notify_at": "...Z", "errors": [] }
@@ -308,6 +309,10 @@ shy of firing). The full snapshot (indicators + thresholds) is persisted per
 signal in the `signal_log.features` column of each `trading*.db`, so HOLDs are
 queryable for threshold tuning instead of being an invisible gap — the trade log
 only ever records the signals that *did* fire.
+
+`exit_reasons` says how the window's round trips actually ended — `stop_loss`,
+`take_profit`, `position_aging`, or `strategy_exit` — the counterpart to
+`rejection_reasons`.
 
 `risk_breaker` appears only while at least one account's rolling-risk circuit
 breaker is throttling new entries, naming the accounts and when each tripped —
@@ -364,6 +369,8 @@ commented list). Highlights:
   round trip (see below).
 - `risk_breaker_*` — the rolling-risk circuit breaker: shrink or pause new
   entries while trailing risk-adjusted performance stays negative (see below).
+- `max_hold_days`, `max_hold_min_gain_pct` — the position aging cap: rotate a
+  stale holding out so it stops blocking fresh signals (see below).
 - `data_source` — `public` or `coinbase_advanced`.
 
 ### Transaction-cost gate (`cost_floor_*`)
@@ -388,6 +395,30 @@ before enabling it. With `cost_floor_enabled: true` a failing entry is skipped
 and logged with `reject_code: below_cost_floor`. Exits, covers, and protective
 stops are never gated — an open position can always close. The backtester
 applies the identical gate, so a sweep measures the live rule.
+
+### Position aging cap (`max_hold_days`)
+
+A stop fires when a trade goes against you and a target when it goes for you; a
+trade that does neither is held forever. With the book full, every new signal is
+rejected `in_position` — in one live week, 8 of 10 decisions were, while BUY
+signals kept firing on BTC and ETH with no capital and no slot to take them.
+
+With `max_hold_days` set, a position held longer than that is closed unless it
+is carrying at least `max_hold_min_gain_pct` unrealized gain. The threshold is a
+*meaningful* gain rather than merely "green" — a position up 0.5% after a month
+is precisely the stale hold this exists to rotate out — and it is
+direction-aware, so a short counts a falling price as gain. A position that is
+genuinely working keeps its slot and is left to the trailing stop, which is the
+mechanism for riding winners.
+
+Stops and targets are checked first, so an aging exit never pre-empts a real
+one, and its reason (`Position aging: ...`) deliberately doesn't match the
+stop-out prefix — an aged-out exit must not start the post-stop re-entry
+cooldown, or the freed capital couldn't be redeployed. Exits are tallied in
+`overseer-status.json` under `exit_reasons`, the counterpart to
+`rejection_reasons`: one says why nothing could be entered, the other says what
+freed a slot. Disabled by default (`max_hold_days: 0`); the backtester applies
+the same cap.
 
 ### Rolling-risk circuit breaker (`risk_breaker_*`)
 
