@@ -197,3 +197,59 @@ def test_regime_ignores_sentiment():
         "BTC-USD", closes([100 + 2 * i for i in range(20)]), sentiment=FakeSentiment(-0.9)
     )
     assert sig.action == BUY
+
+
+@pytest.mark.parametrize('price,expected', [(103, BUY), (97, SELL), (100, HOLD), (102, HOLD), (98, HOLD)])
+def test_adaptive_bands_scale_with_prior_volatility(price, expected):
+    cfg = StrategyConfig(donchian_period=4, donchian_exit_period=3,
+                         atr_period=3, adaptive_breakout=True)
+    quiet = ohlc([(101, 99, 100)] * 5 + [(price + 1, price - 1, price)])
+    noisy = ohlc([(105, 95, 100)] * 5 + [(price + 1, price - 1, price)])
+    strategy = DonchianBreakoutStrategy(cfg)
+    signal = strategy.generate_signal('BTC-USD', quiet)
+    assert signal.action == expected
+    assert strategy.generate_signal('BTC-USD', noisy).action == HOLD
+    assert signal.indicators['entry_band'] == 102
+    assert signal.indicators['exit_band'] == 98
+    assert signal.thresholds['breakout_dist_atr'] == (price - 102) / 2
+    # A giant current wick must not move the band used for this decision.
+    quiet[-1]['high'] = 1000
+    quiet[-1]['low'] = 1
+    assert strategy.generate_signal('BTC-USD', quiet).indicators['entry_band'] == 102
+
+
+def test_adaptive_can_enter_inside_old_channel_and_exposes_raw_distance():
+    rows = ohlc([(110, 90, 100)] + [(100.1, 99.9, 100)] * 20 + [(101, 100, 101)])
+    cfg = StrategyConfig(donchian_period=21, donchian_exit_period=21, atr_period=3)
+    assert DonchianBreakoutStrategy(cfg).generate_signal('BTC-USD', rows).action == HOLD
+    cfg.adaptive_breakout = True
+    sig = DonchianBreakoutStrategy(cfg).generate_signal('BTC-USD', rows)
+    assert sig.action == BUY
+    assert sig.thresholds['raw_breakout_dist_pct'] < 0
+    assert sig.thresholds['breakout_dist_pct'] > 0
+
+
+def test_adaptive_zero_volatility_and_warmup_hold():
+    s = DonchianBreakoutStrategy(StrategyConfig(adaptive_breakout=True, atr_period=3,
+                                               donchian_period=3, donchian_exit_period=3))
+    assert s.min_candles() == 5
+    assert s.generate_signal('BTC-USD', closes([100] * 4)).action == HOLD
+    sig = s.generate_signal('BTC-USD', closes([100] * 5 + [101]))
+    assert sig.action == HOLD
+    assert sig.thresholds['breakout_dist_atr'] is None
+
+
+@pytest.mark.parametrize('value', [0, -1, float('nan'), float('inf'), True, '1'])
+def test_adaptive_rejects_invalid_multipliers(value):
+    with pytest.raises(ValueError, match='finite and positive'):
+        DonchianBreakoutStrategy(StrategyConfig(breakout_atr_mult=value))
+
+
+def test_adaptive_preserves_subcent_volatility_and_sentiment_veto():
+    s = DonchianBreakoutStrategy(StrategyConfig(adaptive_breakout=True, atr_period=3,
+                                               donchian_period=3, donchian_exit_period=3))
+    rows = ohlc([(0.0011, 0.0009, 0.001)] * 5 + [(0.0014, 0.0012, 0.0013)])
+    sig = s.generate_signal('TEST-USD', rows)
+    assert sig.action == BUY
+    assert sig.indicators['prior_atr'] == pytest.approx(0.0002)
+    assert s.generate_signal('TEST-USD', rows, FakeSentiment(-0.5)).action == HOLD

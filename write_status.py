@@ -597,7 +597,8 @@ def signal_proximity(decisions, near_pct=NEAR_TRIGGER_PCT):
         # The near-miss test only applies to percentage-denominated gaps, where
         # NEAR_TRIGGER_PCT means something. Point-denominated ones (RSI, ADX) are
         # still reported for the chart, but they do not vote on the verdict.
-        if key.endswith("_pct"):
+        # Historical raw channel gaps are comparison data, not active triggers.
+        if key.endswith("_pct") and not key.startswith("raw_"):
             entry["near_trigger"] = sum(1 for g in gaps if g <= near_pct)
             near_total += entry["near_trigger"]
             pct_samples += len(gaps)

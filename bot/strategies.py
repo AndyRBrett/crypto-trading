@@ -13,6 +13,7 @@ Pick a strategy per account with ``make_strategy(strategy_type, config)``.
 
 from __future__ import annotations
 
+import math
 from typing import Sequence
 
 from . import indicators
@@ -538,15 +539,23 @@ class DonchianBreakoutStrategy:
 
     BUY when price breaks above the highest high of the prior ``donchian_period``
     bars; SELL when it breaks below the lowest low of the prior
-    ``donchian_exit_period`` bars. The engine's ATR stops/trailing ride on top.
+    ``donchian_exit_period`` bars. With ``adaptive_breakout``, use the prior
+    close plus/minus configured multiples of prior ATR instead. Both the
+    anchor and volatility exclude the signal bar. Zero ATR holds until ready.
+    The engine's ATR stops/trailing ride on top.
     """
 
     def __init__(self, config: StrategyConfig | None = None):
         self.config = config or StrategyConfig()
+        for name in ("breakout_atr_mult", "exit_atr_mult"):
+            value = getattr(self.config, name)
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(value) or value <= 0):
+                raise ValueError(f"{name} must be finite and positive")
 
     def min_candles(self) -> int:
         c = self.config
-        return max(c.donchian_period, c.donchian_exit_period, c.atr_period) + 1
+        return max(c.donchian_period, c.donchian_exit_period, c.atr_period + int(c.adaptive_breakout)) + 1
 
     def generate_signal(
         self, product_id: str, candles: Sequence[dict], sentiment=None
@@ -563,6 +572,15 @@ class DonchianBreakoutStrategy:
         lower = min(lows[-c.donchian_exit_period - 1 : -1])
         atr_val = indicators.atr(highs, lows, closes, c.atr_period)
 
+        raw_upper, raw_lower = upper, lower
+        # Freeze the bands before the signal bar: a large move must not widen
+        # its own trigger. Use unrounded ATR (including for low-priced assets).
+        prior_atr = indicators.atr(highs[:-1], lows[:-1], closes[:-1], c.atr_period)
+        vol_ready = prior_atr is not None and math.isfinite(prior_atr) and prior_atr > 0
+        if c.adaptive_breakout and vol_ready:
+            upper = closes[-2] + c.breakout_atr_mult * prior_atr
+            lower = max(0.0, closes[-2] - c.exit_atr_mult * prior_atr)
+
         snapshot = {
             "donchian_upper": round(upper, 2),
             "donchian_lower": round(lower, 2),
@@ -575,18 +593,20 @@ class DonchianBreakoutStrategy:
         action = HOLD
         strength = 0.0
 
-        if price > upper:
+        if c.adaptive_breakout and not vol_ready:
+            reasons.append("Adaptive bands need positive prior ATR — holding.")
+        elif price > upper:
             action = BUY
             reasons.append(
                 f"Breakout: price ${price:,.2f} broke above the "
-                f"{c.donchian_period}-bar high ${upper:,.2f} — momentum entry."
+                f"entry band ${upper:,.2f} — momentum entry."
             )
             strength = min(1.0, 0.5 + (price - upper) / upper * 20 if upper else 0.5)
         elif price < lower:
             action = SELL
             reasons.append(
                 f"Channel exit: price ${price:,.2f} broke below the "
-                f"{c.donchian_exit_period}-bar low ${lower:,.2f} — exiting."
+                f"exit band ${lower:,.2f} — exiting."
             )
             strength = min(1.0, 0.5 + (lower - price) / lower * 20 if lower else 0.5)
         else:
@@ -604,6 +624,16 @@ class DonchianBreakoutStrategy:
             # < 0 once price breaks below the exit channel low (SELL).
             "exit_dist_pct": round((price - lower) / lower * 100, 3) if lower else 0.0,
         }
+
+        thresholds.update({
+            "raw_breakout_dist_pct": round((price - raw_upper) / raw_upper * 100, 3) if raw_upper else 0.0,
+            "raw_exit_dist_pct": round((price - raw_lower) / raw_lower * 100, 3) if raw_lower else 0.0,
+            "breakout_dist_atr": round((price - upper) / prior_atr, 6) if vol_ready else None,
+            "exit_dist_atr": round((price - lower) / prior_atr, 6) if vol_ready else None,
+        })
+        snapshot.update({"adaptive_breakout": c.adaptive_breakout,
+                         "prior_atr": prior_atr if vol_ready else None,
+                         "entry_band": upper, "exit_band": lower})
 
         action, strength = apply_sentiment(
             action, strength, snapshot, sentiment, c, reasons

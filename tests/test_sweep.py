@@ -139,3 +139,16 @@ def test_summary_reports_the_out_of_sample_figures():
     assert "out-of-sample return" in text
     assert "parameter stability" in text
     assert f"{wf.positive_folds}/3" in text
+
+
+def test_adaptive_breakout_walk_forward_accepts_both_modes():
+    grid = {'adaptive_breakout': [False, True], 'breakout_atr_mult': [0.5, 1.0],
+            'exit_atr_mult': [1.0], 'donchian_period': [10],
+            'donchian_exit_period': [5], 'atr_period': [3]}
+    runs = sweep('donchian_breakout', _long_series(500), _cfg(), grid=grid, holdout=0.3)
+    assert len(runs) == 4
+    assert {r.params['adaptive_breakout'] for r in runs} == {False, True}
+    assert all(r.holdout is not None for r in runs)
+    wf = walk_forward('donchian_breakout', _long_series(800), _cfg(), grid=grid, folds=3)
+    assert len(wf.folds) == 3
+    assert all('adaptive_breakout' in f.chosen for f in wf.folds)
