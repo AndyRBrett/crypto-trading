@@ -602,3 +602,42 @@ sizing, stop-loss / take-profit / trailing-stop exits).
 - [ ] Close (or beat) the buy-and-hold gap — see [TODO.md](TODO.md).
 - [ ] More indicators / strategies (MACD, Bollinger, multi-timeframe).
 - [ ] Always-on hosting option.
+
+### Optional volatility-scaled breakout bands (#41)
+
+The `donchian_breakout` strategy defaults to its historical channel rules.
+For an experimental ATR-band alternative, set these in the account's `strategy` block:
+
+```yaml
+adaptive_breakout: true
+breakout_atr_mult: 1.0
+exit_atr_mult: 1.0
+```
+
+The entry band is **prior close + breakout_atr_mult × prior ATR**; the exit
+band is **max(0, prior close − exit_atr_mult × prior ATR)**. Prior ATR uses
+`atr_period` and excludes the signal bar, so a spike cannot inflate its own
+trigger. Price must cross strictly above/below the band. Quiet markets yield
+narrower bands, volatile markets wider ones. Insufficient history or zero ATR
+holds; sentiment gating and the engine's protective exits still apply. This is
+an alternative trigger model, not a rescaling of the historical channel itself.
+It does not change the EMA trend filter or position sizing.
+
+Decision thresholds and Overseer status retain effective `breakout_dist_pct` /
+`exit_dist_pct`, add `raw_*_dist_pct` for the historical-channel baseline, and
+add `breakout_dist_atr` / `exit_dist_atr` in prior-ATR units. Raw baseline gaps
+and ATR gaps do not vote on the percentage-based proximity verdict. Signal
+indicators also record unrounded `prior_atr`, `entry_band`, and `exit_band`.
+
+Compare modes with fees and unseen walk-forward windows before enabling:
+
+```sh
+python -m scripts.sweep --strategy donchian_breakout --product BTC-USD \
+  --count 3000 --walk-forward 4 \
+  --param adaptive_breakout=false,true \
+  --param donchian_period=20 --param donchian_exit_period=10 \
+  --param breakout_atr_mult=0.5,1,2 --param exit_atr_mult=1,2
+```
+
+This feature is disabled by default. Synthetic regression tests verify behavior
+and harness integration; they do not establish a performance improvement.

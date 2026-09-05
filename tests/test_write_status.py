@@ -527,3 +527,15 @@ def test_attribution_reaches_the_status_file(tmp_path):
     for per_window in status["attribution"].values():
         for row in per_window.values():
             assert set(row) == {"pnl", "closed", "realized_drawdown"}
+
+
+def test_adaptive_proximity_keeps_baseline_and_atr_out_of_verdict():
+    prox = write_status.signal_proximity([_dec({
+        'breakout_dist_pct': -2.0, 'raw_breakout_dist_pct': -0.01,
+        'breakout_dist_atr': -0.1,
+    })])
+    assert prox['pct_samples'] == 1
+    assert prox['near_trigger'] == 0
+    assert prox['verdict'] == 'quiet-market'
+    assert prox['metrics']['breakout_dist_atr']['closest'] == 0.1
+    assert prox['metrics']['raw_breakout_dist_pct']['closest'] == 0.01

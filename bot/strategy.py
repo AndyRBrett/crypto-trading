@@ -128,6 +128,10 @@ class StrategyConfig:
     # Donchian breakout (used by the "donchian_breakout" strategy).
     donchian_period: int = 20  # entry channel: break the high of this many bars
     donchian_exit_period: int = 10  # exit channel: break the low of this many bars
+    # Optional prior-close +/- prior ATR bands; legacy channels remain default.
+    adaptive_breakout: bool = False
+    breakout_atr_mult: float = 1.0
+    exit_atr_mult: float = 1.0
     # RSI mean-reversion (used by the "rsi_mean_reversion" strategy).
     rsi_mr_oversold: float = 30.0  # BUY when RSI <= this (oversold bounce)
     rsi_mr_overbought: float = 55.0  # SELL when RSI >= this (reverted to mean)
