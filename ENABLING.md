@@ -302,6 +302,35 @@ below.
 
 ---
 
+## Enablement log
+
+**2026-09-05 — all four new features switched on in `config.ci.yaml`** (cloud
+paper accounts), at the operator's direction, skipping the measure-first weeks
+suggested above. Live-book effects measured at daily settings before flipping:
+
+| Feature | Setting | Expected effect on the live book |
+| --- | --- | --- |
+| `cost_floor_enabled` | `true`, margin 1.5 | Rarely binds. A 6-ATR target on daily candles projects ~1,500 bps against a ~180 bps floor; it blocks only unusually tight setups. |
+| `risk_breaker_enabled` | `true`, 0.5x, 3 days | Halves sizing after 3 consecutive days with Sharpe **and** Sortino ≤ −1.5. Started at 0.5 rather than 0.0 — a paused book earns nothing back. |
+| `max_hold_days` | `21` (tactical only) | Should bite immediately: `in_position` was 7 of 10 rejections. `regime` is exempt (`max_hold_days: 0`) — it exists to hold for months. |
+| `vol_target_enabled` | `true`, 20% (60% on `regime`) | Inert on the tactical sleeves: at 1% risk and a 2-ATR stop their risk bound binds long before the equity cap, so the vol bound never becomes the minimum. Only `regime` (95% cap) is affected. |
+
+Two things to watch, since none of this is backtested:
+
+1. **The aging cap is the one doing real work.** Watch
+   `exit_reasons.position_aging` against the `in_position` share of
+   `rejection_reasons`. If aging exits climb while P&L doesn't improve, the
+   strategies are entering trades that go nowhere and the cap is only surfacing
+   that.
+2. **Vol targeting is currently near-inert by construction.** It bounds only
+   where the flat equity cap binds. If it should shape the tactical sleeves too,
+   the lever is a lower `vol_target_pct` per account — not the global flag,
+   which is already on.
+
+Reverting any of this is a one-line flag flip back to `false` / `0`.
+
+---
+
 ## Standalone blocker: network allowlist
 
 `api.coinbase.com` is blocked by the remote environment's egress policy
