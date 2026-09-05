@@ -352,7 +352,33 @@ commented list). Highlights:
   the EMA crossover + trend/ADX/RSI filters.
 - `risk_per_trade_pct`, `max_position_pct`, `max_open_positions`,
   `stop_loss_atr_mult`, `take_profit_atr_mult`, `trailing_stop` — risk controls.
+- `cost_floor_enabled`, `cost_floor_margin`, `cost_floor_samples` — the
+  transaction-cost gate: skip entries whose projected move doesn't cover the
+  round trip (see below).
 - `data_source` — `public` or `coinbase_advanced`.
+
+### Transaction-cost gate (`cost_floor_*`)
+
+A trade whose projected move is smaller than the cost of making it is a loss
+the moment it fills, however good the setup looked. Before any new entry the
+bot prices the round trip in basis points —
+
+    round-trip cost = 2 x fee_rate + 2 x median(|recent slippage_bps|)
+
+using the per-fill slippage already logged for that product — and compares it
+to the move the trade would actually be managed toward (`take_profit_atr_mult`
+x ATR, or the same reward:risk applied to `fallback_stop_pct` when no ATR is
+available). The entry is allowed only when
+
+    projected move >= round-trip cost x cost_floor_margin
+
+The measurement runs on every entry candidate whether or not the gate is on and
+is written to the signal log (`features.cost_floor`: `edge_bps`, `cost_bps`,
+`required_bps`, `samples`), so you can read what the gate *would* have blocked
+before enabling it. With `cost_floor_enabled: true` a failing entry is skipped
+and logged with `reject_code: below_cost_floor`. Exits, covers, and protective
+stops are never gated — an open position can always close. The backtester
+applies the identical gate, so a sweep measures the live rule.
 
 ### Multiple accounts, multiple strategies
 

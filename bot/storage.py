@@ -228,6 +228,22 @@ class Storage:
             out.append(d)
         return out
 
+    def recent_slippage_bps(self, product_id: str, limit: int = 20) -> list[float]:
+        """Most recent per-fill slippage samples (bps) for one product, newest first.
+
+        Only acted signals carry a slippage value, so this is the realized fill
+        cost history the transaction-cost gate prices a round trip from (#44).
+        Returns an empty list on a store with no fills yet — callers treat that
+        as "fees only", not as zero cost.
+        """
+        rows = self.conn.execute(
+            "SELECT slippage_bps FROM signal_log "
+            "WHERE product_id = ? AND slippage_bps IS NOT NULL "
+            "ORDER BY id DESC LIMIT ?",
+            (product_id, limit),
+        ).fetchall()
+        return [float(r["slippage_bps"]) for r in rows]
+
     # -- trades ------------------------------------------------------------
 
     def save_trade(self, trade: Trade) -> None:

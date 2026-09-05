@@ -1,8 +1,10 @@
 """Historical backtester.
 
 Replays a candle series through a strategy and the *exact* risk layer the live
-engine uses (``bot/risk.py`` for sizing and stops, ``Portfolio`` for fills and
-fees), so results net of fees reflect what the bot would actually have done.
+engine uses (``bot/risk.py`` for sizing and stops, ``bot/costs.py`` for the
+transaction-cost gate, ``Portfolio`` for fills and fees), so results net of fees
+reflect what the bot would actually have done. Backtest fills have no slippage
+to sample, so the cost floor here prices the round trip from fees alone.
 
 This is the measurement tool: change a strategy or a parameter, run a backtest,
 and compare return / drawdown / win-rate before committing the change to live
@@ -18,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from . import risk
+from . import costs, risk
 from .portfolio import Portfolio, closing_legs
 from .strategy import BUY, SELL
 
@@ -128,6 +130,8 @@ def run_backtest(
         elif signal.action == BUY:
             if risk.reentry_cooldown_active(config, portfolio.trades, product_id, ts, bar_seconds):
                 pass  # too soon after a stop-out (same gate as the live engine)
+            elif costs.blocks_entry(config, price, atr):
+                pass  # projected move doesn't clear the round trip (same gate)
             else:
                 equity = portfolio.total_equity(prices)
                 qty = risk.position_size(config, equity, portfolio.cash, price, atr)
@@ -138,6 +142,8 @@ def run_backtest(
         elif signal.action == SELL and allow_short:
             if risk.reentry_cooldown_active(config, portfolio.trades, product_id, ts, bar_seconds):
                 pass  # too soon after a stop-out (same gate as the live engine)
+            elif costs.blocks_entry(config, price, atr):
+                pass  # projected move doesn't clear the round trip (same gate)
             else:
                 equity = portfolio.total_equity(prices)
                 qty = risk.position_size(config, equity, portfolio.cash, price, atr, direction="short")
