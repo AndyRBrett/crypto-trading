@@ -60,6 +60,9 @@ class AccountConfig:
     risk_breaker_sortino_floor: float | None = None
     max_hold_days: float | None = None        # force-exit a stale position after N days
     max_hold_min_gain_pct: float | None = None  # unrealized gain that earns a reprieve
+    vol_target_enabled: bool | None = None   # bound size by annualized vol contribution
+    vol_target_pct: float | None = None      # target vol contribution per position
+    vol_lookback_bars: int | None = None     # bars behind the realized-vol estimate
 
     def resolved_db_path(self) -> str:
         return self.db_path or f"trading.{_sanitize_name(self.name)}.db"
@@ -163,6 +166,17 @@ class Config:
     # the whole thing (default): behavior is exactly as before.
     max_hold_days: float = 0.0
     max_hold_min_gain_pct: float = 0.02
+
+    # Volatility-targeted sizing (bot/volatility.py, issue #53). Adds a bound on
+    # a new position's notional: the size whose expected annualized volatility
+    # contribution is ``vol_target_pct`` of equity, using realized volatility
+    # over ``vol_lookback_bars`` (ATR as a fallback estimate). It only ever
+    # reduces a position — ``max_position_pct`` stays the backstop — so a
+    # high-vol asset stops taking the same notional as a calm one.
+    # Disabled by default: sizing behaves exactly as before.
+    vol_target_enabled: bool = False
+    vol_target_pct: float = 0.20
+    vol_lookback_bars: int = 20
 
     # Cross-account portfolio guard (bot/portfolio_guard.py). The combined
     # gross exposure across ALL accounts is always computed and logged; when

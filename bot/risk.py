@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from .volatility import vol_target_qty
+
 # Notional below which a trade is ignored as dust (USD).
 DUST_NOTIONAL = 10.0
 
@@ -110,6 +112,7 @@ def position_size(
     atr: float | None,
     direction: str = "long",
     size_mult: float = 1.0,
+    asset_vol: float | None = None,
 ) -> float:
     """Volatility-based size so the stop distance risks ~``risk_per_trade_pct``.
 
@@ -123,6 +126,12 @@ def position_size(
     the dust floor, so a size throttled into dust is skipped rather than filled
     as a token trade, and it can never make a position larger: values above 1.0
     are clamped.
+
+    ``asset_vol`` is the asset's annualized volatility (bot/volatility.py). With
+    vol targeting enabled it adds one more bound — the notional whose vol
+    contribution is ``vol_target_pct`` of equity — so a wild asset can't take the
+    same notional as a calm one just because the flat equity cap allowed it
+    (issue #53). Like every other bound here it can only reduce the size.
     """
     if price <= 0 or equity <= 0:
         return 0.0
@@ -131,11 +140,14 @@ def position_size(
         return 0.0
     qty_by_risk = (equity * cfg.risk_per_trade_pct) / stop_dist
     qty_by_cap = (equity * cfg.max_position_pct) / price
-    if direction == "short":
-        qty = min(qty_by_risk, qty_by_cap)
-    else:
-        qty_by_cash = (cash * 0.999) / (price * (1 + cfg.fee_rate))
-        qty = min(qty_by_risk, qty_by_cap, qty_by_cash)
+    bounds = [qty_by_risk, qty_by_cap]
+    if direction != "short":
+        # A short is opened with a SELL that *credits* cash, so no cash bound.
+        bounds.append((cash * 0.999) / (price * (1 + cfg.fee_rate)))
+    qty_by_vol = vol_target_qty(cfg, equity, price, asset_vol)
+    if qty_by_vol is not None:
+        bounds.append(qty_by_vol)
+    qty = min(bounds)
     qty *= max(0.0, min(1.0, size_mult))
     if qty * price < DUST_NOTIONAL:
         return 0.0

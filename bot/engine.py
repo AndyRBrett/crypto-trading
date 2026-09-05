@@ -21,7 +21,7 @@ from .market_data import _GRANULARITY_SECONDS, MarketData, closed_candles
 from .notifier import Notifier
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
 from .publish import Publisher
-from . import breaker, costs, risk
+from . import breaker, costs, risk, volatility
 from .sentiment import SentimentAnalyzer
 from .storage import Storage
 from .strategies import make_strategy
@@ -373,7 +373,7 @@ class Engine:
             if self._breaker_pauses_entries():
                 log.info("%s: %s, skipping BUY", product_id, breaker.describe(self._breaker))
                 return None, RISK_BREAKER
-            qty = self._position_size(price, atr, prices)
+            qty = self._position_size(price, atr, prices, candles=candles)
             if qty <= 0:
                 log.info("%s: position size ~0 after risk limits, skipping BUY", product_id)
                 return None, SIZE_ZERO
@@ -395,7 +395,7 @@ class Engine:
             if self._breaker_pauses_entries():
                 log.info("%s: %s, skipping SHORT", product_id, breaker.describe(self._breaker))
                 return None, RISK_BREAKER
-            qty = self._position_size(price, atr, prices, direction="short")
+            qty = self._position_size(price, atr, prices, direction="short", candles=candles)
             if qty <= 0:
                 log.info("%s: short size ~0 after risk limits, skipping", product_id)
                 return None, SIZE_ZERO
@@ -542,17 +542,38 @@ class Engine:
             self.config, opened, time.time(), pos.avg_price, price, direction
         )
 
-    def _position_size(self, price, atr, prices, direction="long"):
+    def _position_size(self, price, atr, prices, direction="long", candles=None):
         """Volatility-based size so the stop distance risks ~risk_per_trade_pct.
 
         Scaled by the rolling-risk breaker's multiplier (1.0 unless the breaker
         is armed and tripped), so a bleeding book takes the same signals at
-        reduced size instead of at full size (issue #45).
+        reduced size instead of at full size (issue #45), and bounded by the
+        asset's own realized volatility when vol targeting is on (issue #53).
         """
         equity = self.portfolio.cash + self.portfolio.market_value(prices)
         return risk.position_size(
             self.config, equity, self.portfolio.cash, price, atr, direction=direction,
             size_mult=self._breaker["size_multiplier"],
+            asset_vol=self._asset_vol(candles, atr, price),
+        )
+
+    def _asset_vol(self, candles, atr, price) -> float | None:
+        """Annualized volatility of one product, for the vol-target size bound.
+
+        Measured on *closed* candles only — the forming bar's partial move would
+        read as a volatility change that hasn't happened yet. None (no bound)
+        when it can't be measured or vol targeting is off.
+        """
+        if not getattr(self.config, "vol_target_enabled", False):
+            return None
+        closes = [
+            float(c["close"])
+            for c in closed_candles(candles or [], self.config.candle_granularity)
+            if "close" in c
+        ]
+        return volatility.estimate_vol(
+            self.config, closes, atr, price,
+            _GRANULARITY_SECONDS.get(self.config.candle_granularity),
         )
 
     def _buy(self, product_id, price, qty, reasons, indicators):

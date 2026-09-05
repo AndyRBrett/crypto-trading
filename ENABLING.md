@@ -2,7 +2,8 @@
 
 Three features shipped from the 2026-07 audit-and-enhance sessions
 (PR #29), joined later by the transaction-cost gate (#4), the rolling-risk
-circuit breaker (#5) and the position aging cap (#6).
+circuit breaker (#5), the position aging cap (#6) and volatility-targeted
+sizing (#7).
 **All of them are OFF by default** — the five live paper accounts
 behave exactly as before until you flip a flag in `config.ci.yaml` (cloud)
 or `config.yaml` (local). This file is the enable-later checklist: what each
@@ -254,6 +255,50 @@ would fight the strategy — prefer a per-account value over a global one.
 - [ ] Watch `exit_reasons.position_aging` afterwards. A large count means the
       strategy is entering trades that go nowhere; the cap is surfacing that,
       not solving it.
+
+---
+
+## 7. `vol_target_enabled` — volatility-targeted sizing (issue #53)
+
+**What it does.** Bounds a new position's notional by its expected annualized
+volatility contribution (`vol_target_pct` of equity, 20% by default), estimated
+from realized volatility over `vol_lookback_bars` closed candles with `ATR /
+price` as a fallback. It only ever reduces size — `max_position_pct` stays the
+backstop.
+
+**Why it exists.** Sizing divides by ATR, so it looks volatility-aware, but that
+only holds while the risk bound binds. Checked against live settings ($50k book,
+1% risk, 2-ATR stop): a 1.5%-ATR asset sizes to a $16.7k risk bound against a
+$15k equity cap, so the flat cap wins and volatility stops mattering. A wild
+asset and a calm one then take the same notional.
+
+**Verified.**
+- Estimator tests: annualization matches the 24/7 convention `bot/metrics.py`
+  uses, a flat or too-short series returns None rather than a zero volatility
+  (which would divide into an unbounded size), realized volatility is preferred
+  over ATR when closes are available, and the ATR fallback is used when they
+  aren't.
+- Bound tests: it hits the target contribution exactly, binds precisely where
+  the equity cap used to, applies to shorts, and — the property that matters —
+  can never enlarge a position, even with an absurd target.
+- Engine: a wild asset sizes smaller than a calm one on identical price and ATR
+  inputs, the same inputs size identically with the feature off, a still-forming
+  candle can't move the estimate, and an unmeasurable volatility trades normally
+  rather than blocking.
+- The backtester applies the same bound.
+
+**Not verified.** The right `vol_target_pct` is untuned; 20% per position is a
+starting point, not a backtested optimum, and with `max_open_positions: 3` the
+aggregate target is what actually matters. Tuning needs the network allowlist
+below.
+
+**Suggested enablement.**
+- [ ] Enable on one account first with the default 20% and compare its fill
+      notionals against a sibling account on the same products.
+- [ ] Expect it to bind on the high-vol names (SOL) and rarely on BTC — if it
+      binds on everything, the target is too low for this book.
+- [ ] Lower `vol_target_pct` only if realized portfolio volatility
+      (`risk_metrics.volatility_pct`) stays above what you want to run.
 
 ---
 

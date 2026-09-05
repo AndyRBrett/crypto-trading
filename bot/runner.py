@@ -163,6 +163,9 @@ class Runner:
             max_hold_min_gain_pct=pick(
                 acct.max_hold_min_gain_pct, base.max_hold_min_gain_pct
             ),
+            vol_target_enabled=pick(acct.vol_target_enabled, base.vol_target_enabled),
+            vol_target_pct=pick(acct.vol_target_pct, base.vol_target_pct),
+            vol_lookback_bars=pick(acct.vol_lookback_bars, base.vol_lookback_bars),
             # The Runner publishes/coordinates once per tick, not per engine.
             publish_enabled=False,
             coordinate_enabled=False,

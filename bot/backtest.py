@@ -3,7 +3,8 @@
 Replays a candle series through a strategy and the *exact* risk layer the live
 engine uses (``bot/risk.py`` for sizing and stops, ``bot/costs.py`` for the
 transaction-cost gate, ``bot/breaker.py`` for the rolling-risk throttle,
-``Portfolio`` for fills and fees), so results net of fees
+``bot/volatility.py`` for the vol-target size bound, ``Portfolio`` for fills and
+fees), so results net of fees
 reflect what the bot would actually have done. Backtest fills have no slippage
 to sample, so the cost floor here prices the round trip from fees alone.
 
@@ -21,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from . import breaker, costs, risk
+from . import breaker, costs, risk, volatility
 from .portfolio import Portfolio, closing_legs
 from .strategy import BUY, SELL
 
@@ -149,6 +150,10 @@ def run_backtest(
                 qty = risk.position_size(
                     config, equity, portfolio.cash, price, atr,
                     size_mult=breaker.size_multiplier(config, equity_curve, ts),
+                    asset_vol=volatility.estimate_vol(
+                        config, [float(c["close"]) for c in window], atr, price,
+                        bar_seconds,
+                    ),
                 )
                 if qty > 0:
                     portfolio.execute(
@@ -164,6 +169,10 @@ def run_backtest(
                 qty = risk.position_size(
                     config, equity, portfolio.cash, price, atr, direction="short",
                     size_mult=breaker.size_multiplier(config, equity_curve, ts),
+                    asset_vol=volatility.estimate_vol(
+                        config, [float(c["close"]) for c in window], atr, price,
+                        bar_seconds,
+                    ),
                 )
                 if qty > 0:
                     portfolio.execute(
