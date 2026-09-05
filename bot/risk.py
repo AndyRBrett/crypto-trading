@@ -58,6 +58,7 @@ def position_size(
     price: float,
     atr: float | None,
     direction: str = "long",
+    size_mult: float = 1.0,
 ) -> float:
     """Volatility-based size so the stop distance risks ~``risk_per_trade_pct``.
 
@@ -65,6 +66,12 @@ def position_size(
     Returns 0 for non-positive inputs or dust-sized trades. ``direction`` selects
     long vs short: a short is opened with a SELL that *credits* cash, so the
     cash bound doesn't apply — only the risk and equity-cap bounds do.
+
+    ``size_mult`` scales the finished size, which is how the rolling-risk circuit
+    breaker (bot/breaker.py) throttles a bleeding book. It is applied *before*
+    the dust floor, so a size throttled into dust is skipped rather than filled
+    as a token trade, and it can never make a position larger: values above 1.0
+    are clamped.
     """
     if price <= 0 or equity <= 0:
         return 0.0
@@ -78,6 +85,7 @@ def position_size(
     else:
         qty_by_cash = (cash * 0.999) / (price * (1 + cfg.fee_rate))
         qty = min(qty_by_risk, qty_by_cap, qty_by_cash)
+    qty *= max(0.0, min(1.0, size_mult))
     if qty * price < DUST_NOTIONAL:
         return 0.0
     return qty

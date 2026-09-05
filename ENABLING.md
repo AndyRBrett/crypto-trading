@@ -1,7 +1,8 @@
 # Enabling the opt-in features (paper mode checklist)
 
 Three features shipped from the 2026-07 audit-and-enhance sessions
-(PR #29), joined later by the transaction-cost gate (#4 below).
+(PR #29), joined later by the transaction-cost gate (#4) and the rolling-risk
+circuit breaker (#5).
 **All of them are OFF by default** — the five live paper accounts
 behave exactly as before until you flip a flag in `config.ci.yaml` (cloud)
 or `config.yaml` (local). This file is the enable-later checklist: what each
@@ -162,6 +163,55 @@ every entry candidate whether or not it is enabled.
       `overseer-status.json`. A very large count on one account means that
       strategy's targets are structurally too tight for the fee — a strategy
       problem the gate is surfacing, not causing.
+
+---
+
+## 5. `risk_breaker_enabled` — rolling-risk circuit breaker (issue #45)
+
+**What it does.** Each tick, evaluates trailing Sharpe and Sortino (the same
+metrics the overseer reports, from the persisted equity curve) as of each of
+the last `risk_breaker_days` days. When **both** ratios sit at or below their
+floors on every one of those days, new entries are sized at
+`risk_breaker_size_mult` of normal — `0.0` pauses them entirely, logged as
+`risk_breaker`. **Existing positions and every exit are untouched.** It clears
+itself automatically when the metrics recover.
+
+**Why it exists.** 30-day Sharpe −2.54 / Sortino −3.43 with `pnl_90d` −793 and
+a flat equity curve: the book was bleeding slowly and sizing each new trade as
+if nothing were wrong. Sizing keys off ATR, which measures price volatility and
+knows nothing about whether the strategy is working.
+
+**Verified.**
+- Unit tests pin the trip and clear logic: a bleeding curve trips after the
+  configured streak, a recovering one doesn't, a flat (unmeasurable) curve never
+  trips, and a longer `risk_breaker_days` requires a genuinely longer streak.
+  Each daily reading is truncated at that day *and* clipped to its window, so
+  walking back is a real streak rather than one reading counted N times.
+- Sizing: the multiplier scales size, can only ever reduce it, and a size
+  throttled below the dust floor is skipped rather than filled.
+- Engine: a tripped breaker halves the fill, `0.0` rejects entries with
+  `risk_breaker` (longs and shorts alike), a SELL closing an open long still
+  executes at full size while entries are paused, transitions are recorded to
+  meta, and an unreadable equity curve leaves sizing untouched rather than
+  killing the tick.
+- Stateless by construction — no latch to get stuck on across restarts.
+- The backtester applies the same throttle, so the settings are measurable.
+
+**Not verified.** The floors (−1.5) and `risk_breaker_days` (3) are judgement
+calls, not backtested optima — tuning them needs the network allowlist below.
+Note also that a throttle is not a fix: if the breaker trips constantly, the
+strategy is the problem and the breaker is only limiting the bleeding.
+
+**Suggested enablement (after #44 — this one changes sizing, so it is the
+bigger behavioral step).**
+- [ ] Watch `risk_metrics` in `overseer-status.json` for a couple of weeks and
+      note how often both ratios would have been under −1.5 for 3 straight days.
+- [ ] Start conservative: `risk_breaker_enabled: true` with
+      `risk_breaker_size_mult: 0.5` (halve, don't pause).
+- [ ] Watch for the `risk_breaker` block in `overseer-status.json` and the
+      push notification on each trip/recover.
+- [ ] Only move to `0.0` (full pause) if halving proves too slow to stop the
+      bleeding — a paused book earns nothing back.
 
 ---
 

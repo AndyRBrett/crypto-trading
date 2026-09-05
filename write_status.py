@@ -35,6 +35,10 @@ Two further enrichments turn raw numbers into evaluable signal:
   Each ``hold``/``rejected`` decision also carries the signed ``thresholds`` it
   logged — how close that signal came to firing — so "6/6 no_signal" is no longer
   an opaque gap.
+* ``risk_breaker`` (issue #45): the accounts whose rolling-risk circuit breaker is
+  currently throttling new entries, and when each tripped. Present only while at
+  least one account is throttled, so its absence means the whole book is sizing
+  normally.
 * ``risk_metrics``: Sharpe, Sortino, max drawdown and annualized volatility over a
   30-day lookback, computed from the persisted equity curve (see ``bot/metrics.py``
   for the conventions). They scale return against the risk taken to earn it, so a
@@ -73,6 +77,16 @@ SIGNAL_RUN_WINDOW = 900  # seconds (15 min)
 # Cap the rolling equity curve so the status file stays small; the series is
 # downsampled to at most this many points across the headline window.
 MAX_EQUITY_POINTS = 48
+
+
+def _account_name(db_path: str) -> str:
+    """``trading.regime.db`` -> ``regime``; the legacy ``trading.db`` -> ``default``."""
+    stem = db_path.rsplit("/", 1)[-1]
+    if stem.startswith("trading.") and stem.endswith(".db"):
+        middle = stem[len("trading."):-len(".db")]
+        if middle:
+            return middle
+    return "default"
 
 
 def _iso(ts: float) -> str:
@@ -175,6 +189,7 @@ def collect_metrics(now: float | None = None) -> dict:
     push_errors: set[str] = set()      # distinct push failures across the stores
     config_warnings: set[str] = set()  # settings enabled but inert (missing secret)
     equity_skip_warnings: set[str] = set()  # stores currently stuck on a stale equity snapshot
+    breaker_tripped: dict[str, float | None] = {}  # accounts currently throttled (issue #45)
     last_notify: float | None = None   # most recent successful push, any account
 
     db_paths = sorted(glob.glob(DB_GLOB))
@@ -267,6 +282,16 @@ def collect_metrics(now: float | None = None) -> dict:
                     f"equity snapshot stale since {since}: "
                     f"no fresh price for {products}"
                 )
+            # Rolling-risk breaker (issue #45). The engine records its own
+            # trip/recover transitions against its real config; reporting the
+            # recorded state (rather than recomputing it here with guessed
+            # floors) is what makes "why did sizing halve?" answerable.
+            if meta.get("risk_breaker_tripped"):
+                try:
+                    changed = float(meta.get("risk_breaker_changed_at") or 0.0) or None
+                except ValueError:
+                    changed = None
+                breaker_tripped[_account_name(path)] = changed
             for warning in (meta.get("config_warnings") or "").splitlines():
                 if warning.strip():
                     config_warnings.add(warning.strip())
@@ -382,6 +407,13 @@ def collect_metrics(now: float | None = None) -> dict:
         risk = risk_metrics(risk_curve, now=now)
         if risk:
             status["risk_metrics"] = risk
+    if breaker_tripped:
+        status["risk_breaker"] = {
+            "tripped_accounts": sorted(breaker_tripped),
+            "since": {
+                name: _iso(ts) for name, ts in sorted(breaker_tripped.items()) if ts
+            },
+        }
     status["signals_evaluated"] = signals_evaluated
     status["signals_acted"] = signals_acted
     # Decision log (issue #23): why each evaluated signal did/didn't trade, and

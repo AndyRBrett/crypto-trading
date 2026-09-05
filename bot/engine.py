@@ -21,13 +21,18 @@ from .market_data import _GRANULARITY_SECONDS, MarketData, closed_candles
 from .notifier import Notifier
 from .portfolio import InsufficientFunds, InsufficientPosition, Portfolio
 from .publish import Publisher
-from . import costs, risk
+from . import breaker, costs, risk
 from .sentiment import SentimentAnalyzer
 from .storage import Storage
 from .strategies import make_strategy
 from .strategy import BUY, HOLD, SELL
 
 log = logging.getLogger(__name__)
+
+# Equity snapshots read back for the rolling-risk breaker: enough to cover its
+# trailing window with hourly ticks (30 days x 24 + headroom for the extra days
+# it walks back), bounded so the query stays cheap.
+EQUITY_CURVE_LIMIT = 1000
 
 # Why an evaluated signal did or didn't become a trade (issue #23). These stable
 # enums land in signal_log.reject_code so the overseer can account for every
@@ -43,10 +48,11 @@ INSUFFICIENT_BALANCE = "insufficient_balance"  # BUY rejected: not enough cash
 REENTRY_COOLDOWN = "reentry_cooldown"  # entry blocked: too soon after a stop-out
 PORTFOLIO_EXPOSURE = "portfolio_exposure"  # entry vetoed: combined gross over cap
 BELOW_COST_FLOOR = "below_cost_floor"  # entry vetoed: projected move < round-trip cost
+RISK_BREAKER = "risk_breaker"  # entry paused: rolling risk-adjusted performance below floor
 # reject_codes that mean "we wanted to BUY but couldn't" vs. "no actionable signal".
 _REJECTED_CODES = frozenset(
     {MAX_OPEN_POSITIONS, SIZE_ZERO, INSUFFICIENT_BALANCE, REENTRY_COOLDOWN,
-     PORTFOLIO_EXPOSURE, BELOW_COST_FLOOR}
+     PORTFOLIO_EXPOSURE, BELOW_COST_FLOOR, RISK_BREAKER}
 )
 
 
@@ -98,6 +104,9 @@ class Engine:
         # Last cost-floor measurement per product (issue #44), attached to the
         # signal log so the gate's effect is readable before it's switched on.
         self._cost_floor: dict = {}
+        # This tick's rolling-risk breaker state (issue #45), recomputed at the
+        # top of every tick from the persisted equity curve.
+        self._breaker: dict = breaker.breaker_state(config, [], time.time())
         # Last tick's market snapshot, surfaced for the multi-account Runner's
         # combined dashboard export.
         self.last_prices: dict = {}
@@ -121,6 +130,10 @@ class Engine:
                 log.info("Laptop driver is active; cloud standing down this run.")
                 return []
             self.coordinator.claim_lease()
+
+        # Rolling-risk breaker: one evaluation per tick, shared by every product
+        # (it is a portfolio-level throttle, not a per-signal filter).
+        self._refresh_breaker()
 
         executed = []
         prices: dict[str, float] = {}
@@ -241,6 +254,10 @@ class Engine:
             cost_floor = self._cost_floor.pop(product_id, None)
             if cost_floor is not None:
                 features["cost_floor"] = cost_floor
+            # Portfolio-level throttle in force this tick (issue #45), recorded
+            # so a shrunk (or skipped) entry is explainable after the fact.
+            if self._breaker["tripped"] or self._breaker["days_breached"]:
+                features["risk_breaker"] = self._breaker
             try:
                 self.storage.save_signal(
                     time.time(), product_id, signal.action, price,
@@ -353,6 +370,9 @@ class Engine:
                 return None, MAX_OPEN_POSITIONS
             if self._below_cost_floor(product_id, price, atr):
                 return None, BELOW_COST_FLOOR
+            if self._breaker_pauses_entries():
+                log.info("%s: %s, skipping BUY", product_id, breaker.describe(self._breaker))
+                return None, RISK_BREAKER
             qty = self._position_size(price, atr, prices)
             if qty <= 0:
                 log.info("%s: position size ~0 after risk limits, skipping BUY", product_id)
@@ -372,6 +392,9 @@ class Engine:
                 return None, MAX_OPEN_POSITIONS
             if self._below_cost_floor(product_id, price, atr):
                 return None, BELOW_COST_FLOOR
+            if self._breaker_pauses_entries():
+                log.info("%s: %s, skipping SHORT", product_id, breaker.describe(self._breaker))
+                return None, RISK_BREAKER
             qty = self._position_size(price, atr, prices, direction="short")
             if qty <= 0:
                 log.info("%s: short size ~0 after risk limits, skipping", product_id)
@@ -395,6 +418,48 @@ class Engine:
         if not ok:
             log.info("%s: portfolio guard vetoed entry — %s", product_id, why)
         return not ok
+
+    def _refresh_breaker(self) -> None:
+        """Recompute the rolling-risk breaker from the persisted equity curve.
+
+        Evaluated once per tick and cached on the engine: it is a portfolio-level
+        judgement about whether the strategy is working, so every product this
+        tick sees the same answer. State transitions (trip / recover) are logged,
+        persisted to meta for overseer status, and pushed — a book that quietly
+        halved its own size is exactly the kind of change that must not be
+        invisible. Any failure leaves sizing untouched: the breaker may never be
+        the reason a tick dies.
+        """
+        try:
+            rows = self.storage.load_equity_curve(limit=EQUITY_CURVE_LIMIT)
+            curve = [(float(r["timestamp"]), float(r["equity"])) for r in rows]
+            state = breaker.breaker_state(self.config, curve, time.time())
+        except Exception as exc:
+            log.warning("could not evaluate the risk breaker: %s", exc)
+            return
+        was_tripped = self.storage.get_meta("risk_breaker_tripped") == "1"
+        self._breaker = state
+        if state["tripped"] != was_tripped:
+            log.warning("%s", breaker.describe(state))
+            self.storage.set_meta("risk_breaker_tripped", "1" if state["tripped"] else "")
+            self.storage.set_meta(
+                "risk_breaker_changed_at", str(time.time())
+            )
+            self._notify(
+                title=(
+                    f"{self._notif_prefix()}Risk breaker "
+                    f"{'tripped' if state['tripped'] else 'cleared'}"
+                ),
+                message=breaker.describe(state),
+                tags="warning" if state["tripped"] else "white_check_mark",
+                priority="high" if state["tripped"] else "default",
+            )
+        elif state["tripped"]:
+            log.info("%s", breaker.describe(state))
+
+    def _breaker_pauses_entries(self) -> bool:
+        """True when the breaker is throttling new entries all the way to zero."""
+        return self._breaker["tripped"] and self._breaker["size_multiplier"] <= 0
 
     def _below_cost_floor(self, product_id: str, price: float, atr) -> bool:
         """True when this entry's projected move doesn't clear its round-trip cost.
@@ -466,10 +531,16 @@ class Engine:
         return risk.protective_exit_reason(self.config, pos.avg_price, price, atr, highs)
 
     def _position_size(self, price, atr, prices, direction="long"):
-        """Volatility-based size so the stop distance risks ~risk_per_trade_pct."""
+        """Volatility-based size so the stop distance risks ~risk_per_trade_pct.
+
+        Scaled by the rolling-risk breaker's multiplier (1.0 unless the breaker
+        is armed and tripped), so a bleeding book takes the same signals at
+        reduced size instead of at full size (issue #45).
+        """
         equity = self.portfolio.cash + self.portfolio.market_value(prices)
         return risk.position_size(
-            self.config, equity, self.portfolio.cash, price, atr, direction=direction
+            self.config, equity, self.portfolio.cash, price, atr, direction=direction,
+            size_mult=self._breaker["size_multiplier"],
         )
 
     def _buy(self, product_id, price, qty, reasons, indicators):

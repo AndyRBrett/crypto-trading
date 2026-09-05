@@ -2,7 +2,8 @@
 
 Replays a candle series through a strategy and the *exact* risk layer the live
 engine uses (``bot/risk.py`` for sizing and stops, ``bot/costs.py`` for the
-transaction-cost gate, ``Portfolio`` for fills and fees), so results net of fees
+transaction-cost gate, ``bot/breaker.py`` for the rolling-risk throttle,
+``Portfolio`` for fills and fees), so results net of fees
 reflect what the bot would actually have done. Backtest fills have no slippage
 to sample, so the cost floor here prices the round trip from fees alone.
 
@@ -20,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from . import costs, risk
+from . import breaker, costs, risk
 from .portfolio import Portfolio, closing_legs
 from .strategy import BUY, SELL
 
@@ -78,6 +79,9 @@ def run_backtest(
     allow_short = bool(getattr(config, "allow_short", False))
     peak_equity = config.starting_cash
     max_dd = 0.0
+    # Equity curve accumulated as the replay runs, so the rolling-risk breaker
+    # sees exactly what the live engine sees: its own track record so far.
+    equity_curve: list[tuple[float, float]] = []
 
     candles = list(candles)
     # Bar length for the post-stop re-entry cooldown (parity with the live
@@ -134,7 +138,10 @@ def run_backtest(
                 pass  # projected move doesn't clear the round trip (same gate)
             else:
                 equity = portfolio.total_equity(prices)
-                qty = risk.position_size(config, equity, portfolio.cash, price, atr)
+                qty = risk.position_size(
+                    config, equity, portfolio.cash, price, atr,
+                    size_mult=breaker.size_multiplier(config, equity_curve, ts),
+                )
                 if qty > 0:
                     portfolio.execute(
                         BUY, product_id, price, qty, timestamp=ts, reasons=signal.reasons
@@ -146,13 +153,17 @@ def run_backtest(
                 pass  # projected move doesn't clear the round trip (same gate)
             else:
                 equity = portfolio.total_equity(prices)
-                qty = risk.position_size(config, equity, portfolio.cash, price, atr, direction="short")
+                qty = risk.position_size(
+                    config, equity, portfolio.cash, price, atr, direction="short",
+                    size_mult=breaker.size_multiplier(config, equity_curve, ts),
+                )
                 if qty > 0:
                     portfolio.execute(
                         SELL, product_id, price, qty, timestamp=ts, reasons=signal.reasons
                     )
 
         equity = portfolio.total_equity(prices)
+        equity_curve.append((float(ts), equity))
         peak_equity = max(peak_equity, equity)
         if peak_equity > 0:
             max_dd = max(max_dd, (peak_equity - equity) / peak_equity)

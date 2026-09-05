@@ -53,6 +53,11 @@ class AccountConfig:
     cost_floor_enabled: bool | None = None  # gate entries on edge vs. round-trip cost
     cost_floor_margin: float | None = None  # required edge as a multiple of that cost
     cost_floor_samples: int | None = None   # slippage samples behind the cost estimate
+    risk_breaker_enabled: bool | None = None      # throttle sizing while bleeding
+    risk_breaker_days: int | None = None          # consecutive breaching days to trip
+    risk_breaker_size_mult: float | None = None   # size scale while tripped (0 = pause)
+    risk_breaker_sharpe_floor: float | None = None
+    risk_breaker_sortino_floor: float | None = None
 
     def resolved_db_path(self) -> str:
         return self.db_path or f"trading.{_sanitize_name(self.name)}.db"
@@ -130,6 +135,21 @@ class Config:
     cost_floor_enabled: bool = False
     cost_floor_margin: float = 1.5
     cost_floor_samples: int = 20  # most recent per-fill slippage samples used
+
+    # Rolling-risk circuit breaker (bot/breaker.py, issue #45). Trailing
+    # risk-adjusted performance is evaluated from the persisted equity curve
+    # every tick; when BOTH Sharpe and Sortino sit at or below their floors for
+    # ``risk_breaker_days`` consecutive days, new entries are sized at
+    # ``risk_breaker_size_mult`` of normal (0.0 pauses them entirely) until the
+    # metrics recover. Existing positions and their exits are never touched.
+    # The state is computed and reported whether or not the breaker is armed;
+    # only ``risk_breaker_enabled`` lets it change sizing.
+    risk_breaker_enabled: bool = False
+    risk_breaker_days: int = 3
+    risk_breaker_size_mult: float = 0.5
+    risk_breaker_sharpe_floor: float = -1.5
+    risk_breaker_sortino_floor: float = -1.5
+    risk_breaker_window_days: int = 30
 
     # Cross-account portfolio guard (bot/portfolio_guard.py). The combined
     # gross exposure across ALL accounts is always computed and logged; when

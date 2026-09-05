@@ -276,6 +276,8 @@ plus 30- and 90-day totals:
                    "thresholds": { "ma_gap_pct": -0.42, "rsi_to_overbought": 21.0,
                                    "price_to_trend_pct": -1.2, "adx_to_min": -5.0 } } ],
   "rejection_reasons": { "no_signal": 3, "size_zero": 1 }, "avg_slippage_bps": 3.1,
+  "risk_breaker": { "tripped_accounts": ["long_short"],
+                    "since": { "long_short": "...Z" } },
   "last_fill_at": null, "last_notify_at": "...Z", "errors": [] }
 ```
 
@@ -306,6 +308,11 @@ shy of firing). The full snapshot (indicators + thresholds) is persisted per
 signal in the `signal_log.features` column of each `trading*.db`, so HOLDs are
 queryable for threshold tuning instead of being an invisible gap — the trade log
 only ever records the signals that *did* fire.
+
+`risk_breaker` appears only while at least one account's rolling-risk circuit
+breaker is throttling new entries, naming the accounts and when each tripped —
+so a book that halved its own size explains itself here rather than looking like
+a quiet week. Its absence means everything is sizing normally.
 
 `risk_metrics` makes a raw P&L number interpretable by scaling return against the
 risk taken to earn it. Computed from the persisted equity curve over a **30-day
@@ -355,6 +362,8 @@ commented list). Highlights:
 - `cost_floor_enabled`, `cost_floor_margin`, `cost_floor_samples` — the
   transaction-cost gate: skip entries whose projected move doesn't cover the
   round trip (see below).
+- `risk_breaker_*` — the rolling-risk circuit breaker: shrink or pause new
+  entries while trailing risk-adjusted performance stays negative (see below).
 - `data_source` — `public` or `coinbase_advanced`.
 
 ### Transaction-cost gate (`cost_floor_*`)
@@ -379,6 +388,34 @@ before enabling it. With `cost_floor_enabled: true` a failing entry is skipped
 and logged with `reject_code: below_cost_floor`. Exits, covers, and protective
 stops are never gated — an open position can always close. The backtester
 applies the identical gate, so a sweep measures the live rule.
+
+### Rolling-risk circuit breaker (`risk_breaker_*`)
+
+Position sizing keys off *price* volatility (ATR), which knows nothing about
+whether the strategy is actually working — a book with a −2.5 Sharpe sizes its
+next trade exactly like a winning one. The breaker adds that feedback loop.
+
+Every tick it evaluates the trailing risk-adjusted metrics (the same Sharpe and
+Sortino the overseer reports, from the persisted equity curve) as of each of the
+last `risk_breaker_days` days. A day counts as breaching only when **both**
+ratios sit at or below their floors — they disagree exactly when the losses are
+all in one tail, which is the case where throttling the whole book is the wrong
+call. A day with too little curve to measure breaks the streak rather than
+extending it: the breaker fires on evidence of bleeding, never on its absence.
+
+When every one of those days breaches, new entries are sized at
+`risk_breaker_size_mult` of normal (`0.0` pauses them entirely, logged as
+`reject_code: risk_breaker`). Exits, covers, and protective stops are never
+throttled — a de-risking book must still be able to reduce risk, and a size
+throttled below the $10 dust floor is skipped rather than filled as a token
+trade.
+
+Nothing is latched: the state is recomputed from the curve each tick, so it
+clears itself the moment performance recovers, survives restarts and
+fresh-VM-per-tick cloud runs with no extra state, and can't get stuck on. Trips
+and recoveries are logged, pushed as a notification, and reported in
+`overseer-status.json` under `risk_breaker`. The backtester applies the same
+throttle, so a sweep measures the live rule.
 
 ### Multiple accounts, multiple strategies
 
