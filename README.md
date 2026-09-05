@@ -602,7 +602,6 @@ sizing, stop-loss / take-profit / trailing-stop exits).
 - [ ] Close (or beat) the buy-and-hold gap — see [TODO.md](TODO.md).
 - [ ] More indicators / strategies (MACD, Bollinger, multi-timeframe).
 - [ ] Always-on hosting option.
-
 ### Optional volatility-scaled breakout bands (#41)
 
 The `donchian_breakout` strategy defaults to its historical channel rules.
@@ -641,3 +640,55 @@ python -m scripts.sweep --strategy donchian_breakout --product BTC-USD \
 
 This feature is disabled by default. Synthetic regression tests verify behavior
 and harness integration; they do not establish a performance improvement.
+
+### Correlation and concentration guard (#42)
+
+The Runner now measures combined gross exposure by asset across all accounts,
+with rolling Pearson correlations from aligned **closed-candle return intervals**.
+It fetches the full configured universe before any account trades, using the
+shared per-tick cache. Positions opened by earlier accounts immediately consume
+capacity for later entries.
+
+The new entry veto is separately opt-in at the top level of the config:
+
+```yaml
+correlation_guard_enabled: true
+correlation_lookback: 60
+correlation_min_samples: 20
+correlation_cluster_threshold: 0.8
+max_asset_exposure_pct: 0.5
+max_correlated_exposure_pct: 0.8
+```
+
+Values are fractions of combined equity, so `0.5` means 50%. Defaults are
+experimental limits, not optimized parameters. The existing
+`portfolio_guard_enabled` / `max_gross_exposure_pct` cap remains independent.
+The new guard rejects a proposed entry if either its asset's gross exposure
+or the projected correlation-adjusted exposure exceeds its cap. It does not
+resize orders. Long and short entries both count positively; closes, covers,
+and protective stops remain unrestricted. Rejections retain the
+`portfolio_exposure` code and log which limit was exceeded.
+
+For asset gross notionals `g`, the exposure proxy is
+`sqrt(sum(g_i²) + 2 * sum(abs(correlation_ij) * g_i * g_j))`.
+The exported `effective_open_risk` is this dollar amount; `effective_beta` is
+that amount divided by combined equity. Despite the field name requested in
+#42, **this is not a regression beta against BTC or a forecast of loss**.
+Absolute correlations deliberately grant no hedge credit to shorts or negative
+correlations. Offset positions in different accounts retain their gross size.
+Missing, stale, constant, or insufficient aligned history assumes correlation
+1.0. Old history is cleared every tick. Only equal consecutive intervals enter
+the estimator; the lookback counts bars, not days.
+
+`portfolio_risk` in dashboard state and `overseer-status.json` includes both
+metrics, per-asset gross notionals, pair correlations/sample counts/fallback
+flags, configured caps, and gross exposure for each correlation cluster.
+Clusters are connected components at the absolute-correlation threshold; they
+are descriptive, while the continuous exposure proxy controls the veto.
+The snapshot is persisted in the first account's SQLite metadata for Overseer;
+its `as_of` timestamp and status `stale` flag expose an old snapshot.
+
+The feature remains off in the running configuration. Tests use synthetic
+returns to check enforcement and data handling; they do not establish improved
+trading performance. The single-asset backtester does not simulate this
+cross-account guard.

@@ -414,7 +414,7 @@ class Engine:
         """
         if self.portfolio_guard is None:
             return False
-        ok, why = self.portfolio_guard.allows_entry(notional, prices)
+        ok, why = self.portfolio_guard.allows_entry(notional, prices, product_id=product_id)
         if not ok:
             log.info("%s: portfolio guard vetoed entry — %s", product_id, why)
         return not ok

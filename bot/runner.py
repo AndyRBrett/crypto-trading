@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import json
 import os
 import tempfile
 import time
@@ -24,7 +25,7 @@ from .config import Config
 from .coordinate import Coordinator
 from .engine import Engine
 from .explain import Explainer
-from .market_data import MarketData
+from .market_data import MarketData, closed_candles, _GRANULARITY_SECONDS
 from .notifier import Notifier, derive_public_key
 from .portfolio_guard import PortfolioGuard
 from .publish import Publisher
@@ -188,6 +189,17 @@ class Runner:
 
         self.market_data.clear()
         self._record_config_warnings()
+        # Prepare the complete cross-account universe before ANY entry, so
+        # account iteration order cannot change the correlation evidence.
+        histories = {}
+        for pid in sorted({pid for acct, _ in self.engines for pid in acct.products}):
+            try:
+                histories[pid] = closed_candles(
+                    self.market_data.get_candles(pid), self.config.candle_granularity)
+            except Exception as exc:
+                log.warning("Correlation history unavailable for %s: %s", pid, exc)
+        self.portfolio_guard.prepare(
+            histories, _GRANULARITY_SECONDS[self.config.candle_granularity])
         all_trades: list = []
         for acct, engine in self.engines:
             all_trades += engine.tick()
@@ -203,6 +215,8 @@ class Runner:
             snap["equity"],
         )
 
+        if self.engines:
+            self.engines[0][1].storage.set_meta("portfolio_risk", json.dumps(snap))
         self._export_combined()
         self._maybe_heartbeat()
         if self.publisher.enabled:
@@ -318,6 +332,7 @@ class Runner:
             )
         export_combined_state(
             self.config.dashboard_state_path, blocks, prices, price_history,
+            portfolio_risk=self.portfolio_guard.snapshot(),
             granularity=self.config.candle_granularity,
             vapid_public_key=derive_public_key(self.config.vapid_private_key),
         )
