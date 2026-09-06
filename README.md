@@ -294,9 +294,12 @@ heartbeat: a healthy-but-idle bot (`signals_evaluated > 0`, `trades: 0`) is
 distinguishable from a silently dead one (`signals_evaluated: 0`).
 
 `benchmark` turns raw P&L into alpha-vs-holding: it marks each traded symbol at
-the window's start and end, holds the notional the strategy actually deployed,
-and reports the strategy's return against that buy-and-hold return plus the
-`alpha_pct` between them (omitted when no capital was deployed in the window).
+the window's start and end, holds the *entry* notional behind the round trips
+that closed in the window (`deployed_notional` — the same capital whose realized
+P&L is `pnl`), and reports the strategy's return against that buy-and-hold
+return plus the `alpha_pct` between them (omitted when nothing closed in the
+window). Both legs therefore describe one set of trades; positions opened but
+still open are in neither, since they have realized nothing yet.
 `equity_curve` is a small rolling series for a dashboard chart. The decision log
 accounts for every evaluated signal: `decisions` lists each one's `outcome`
 (`acted` / `rejected` / `hold`) and `reject_code`, `rejection_reasons` tallies

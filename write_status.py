@@ -26,9 +26,10 @@ Two further enrichments turn raw numbers into evaluable signal:
 * A buy-and-hold ``benchmark`` (issue #22): raw P&L doesn't say whether the
   strategy beats passively holding the same coins. Using per-symbol mark prices
   at the window's start and end (from the trade + signal logs), weighted by the
-  notional the strategy actually deployed, it reports ``strategy_return_pct`` vs.
-  ``buy_hold_return_pct`` and the ``alpha_pct`` between them, plus a small rolling
-  ``equity_curve`` for a dashboard chart.
+  entry notional behind the round trips that closed in the window — the very
+  capital that earned the reported P&L (issue #66) — it reports
+  ``strategy_return_pct`` vs. ``buy_hold_return_pct`` and the ``alpha_pct``
+  between them, plus a small rolling ``equity_curve`` for a dashboard chart.
 * A per-signal decision log (issue #23): ``rejection_reasons`` (a count of why
   evaluated signals didn't trade) and ``avg_slippage_bps`` (realized signal-to-
   fill slippage on the ones that did), so tuning is data-driven instead of guesswork.
@@ -60,7 +61,7 @@ import time
 from datetime import datetime, timezone
 
 from bot.metrics import RISK_WINDOW_DAYS, risk_metrics
-from bot.portfolio import Portfolio, Trade, closing_legs
+from bot.portfolio import Portfolio, Trade, closing_leg_basis, closing_legs
 from bot.risk import STOP_REASON_PREFIX
 
 WINDOW_DAYS = 7
@@ -242,7 +243,10 @@ def collect_metrics(now: float | None = None) -> dict:
     run_since = now - SIGNAL_RUN_WINDOW
 
     # Buy-and-hold benchmark accumulators over the headline window (issue #22).
-    buy_notional: dict[str, float] = {}            # strategy capital deployed per symbol
+    # Keyed on the round trips that *closed* in the window — the same trades
+    # whose realized P&L makes up `pnl` — so the benchmark's numerator and
+    # denominator describe one set of trades (issue #66).
+    closed_basis: dict[str, float] = {}            # entry notional of those round trips
     first_mark: dict[str, tuple[float, float]] = {}  # earliest (ts, price) seen per symbol
     last_mark: dict[str, tuple[float, float]] = {}   # latest (ts, price) seen per symbol
     # Per-store snapshots over the full load window (risk lookback); the 7-day
@@ -370,6 +374,7 @@ def collect_metrics(now: float | None = None) -> dict:
             ],
         ).trades
         closers = {id(t) for t in closing_legs(store_trades)}
+        leg_basis = closing_leg_basis(store_trades)
         for t in store_trades:
             ts = t.timestamp
             if last_fill is None or ts > last_fill:
@@ -384,13 +389,18 @@ def collect_metrics(now: float | None = None) -> dict:
                 kind = _exit_kind(t.reasons)
                 exit_kinds[kind] = exit_kinds.get(kind, 0) + 1
             if ts >= head_start:
-                # Every fill is also a mark for the benchmark, and opening legs
-                # (long entries and short entries alike) are the capital the
-                # strategy deployed — its buy-and-hold weighting.
+                # Every fill is also a mark for the benchmark. The benchmark's
+                # weighting is the entry notional behind each *closing* leg —
+                # the capital that earned the window's realized P&L. Weighting
+                # by the window's opening legs instead compared one set of
+                # trades against another: a week that closed positions opened
+                # long ago and opened positions still running divided realized
+                # P&L by capital that had realized nothing (issue #66).
                 _mark(t.product_id, ts, t.price)
-                if id(t) not in closers:
-                    buy_notional[t.product_id] = (
-                        buy_notional.get(t.product_id, 0.0) + t.price * t.quantity
+                if id(t) in closers:
+                    closed_basis[t.product_id] = (
+                        closed_basis.get(t.product_id, 0.0)
+                        + leg_basis.get(id(t), t.price * t.quantity)
                     )
             # Every closing leg inside the widest window, kept once for the
             # per-asset breakdown below (#51). Gathered here rather than in a
@@ -438,7 +448,7 @@ def collect_metrics(now: float | None = None) -> dict:
             status["attribution"] = by_asset
         # Buy-and-hold benchmark + equity curve (issue #22): turn the bare P&L
         # into alpha-vs-holding. Omitted when nothing was deployed in the window.
-        benchmark = _benchmark(pnl[WINDOW_DAYS], buy_notional, first_mark, last_mark)
+        benchmark = _benchmark(pnl[WINDOW_DAYS], closed_basis, first_mark, last_mark)
         if benchmark is not None:
             status["benchmark"] = benchmark
         curve = _aggregate_equity(equity_series, clip_start=head_start)
@@ -692,25 +702,35 @@ def attribution(closed_legs, window_starts, windows):
 
 def _benchmark(
     strategy_pnl: float,
-    buy_notional: dict[str, float],
+    closed_basis: dict[str, float],
     first_mark: dict[str, tuple[float, float]],
     last_mark: dict[str, tuple[float, float]],
 ) -> dict | None:
     """Buy-and-hold benchmark over the headline window (issue #22).
 
-    For each symbol the strategy deployed capital into, value that capital as if
-    it had simply been held from the window's start mark to its end mark, then
-    compare against the strategy's realized P&L. Both returns are expressed
-    against the same deployed notional so ``alpha_pct`` is apples-to-apples.
+    ``closed_basis`` is the entry notional behind each round trip that *closed*
+    in the window, per symbol — exactly the capital whose realized P&L is
+    ``strategy_pnl``. Value that same capital as if it had simply been held
+    from the window's start mark to its end mark, and the two returns finally
+    divide by the same denominator, so ``alpha_pct`` means "the strategy's
+    round trips vs. leaving that money in the coins".
 
-    Returns ``None`` when no capital was deployed in the window (nothing to
-    benchmark against).
+    Weighting by the window's *opening* legs instead (the pre-#66 behavior) was
+    apples-to-oranges: those positions are still open and have realized
+    nothing, while the P&L in the numerator came from entries that predate the
+    window and contributed no notional. A week with 2 opens and 3 unrelated
+    closes produced a return-on-capital about two disjoint sets of trades.
+
+    Positions opened but not yet closed are therefore absent from both legs:
+    the whole file reports realized P&L, and an open position has none yet.
+
+    Returns ``None`` when nothing closed in the window (nothing to benchmark).
     """
-    deployed = sum(buy_notional.values())
+    deployed = sum(closed_basis.values())
     if deployed <= 0:
         return None
     bh_pnl = 0.0
-    for product_id, notional in buy_notional.items():
+    for product_id, notional in closed_basis.items():
         start = first_mark.get(product_id)
         end = last_mark.get(product_id)
         if not start or not end or start[1] <= 0:

@@ -549,3 +549,52 @@ def test_portfolio_risk_meta_is_reported_with_freshness(tmp_path, monkeypatch):
     fresh = write_status.collect_metrics(10001)['portfolio_risk']
     assert fresh['effective_beta'] == .7 and fresh['stale'] is False
     assert write_status.collect_metrics(12000)['portfolio_risk']['stale'] is True
+
+
+def test_benchmark_weights_closed_round_trips_not_window_opens(tmp_path):
+    """Regression (#66): the benchmark divided realized P&L by the notional of
+    the window's *opening* legs — a different set of trades. A week that closes
+    a position entered before the window and opens one that's still running had
+    a numerator from BTC and a denominator from ETH."""
+    now = 2_000_000_000.0
+    day = 86_400
+    s = Storage(os.path.join(str(tmp_path), "trading.mix.db"))
+    # BTC round trip: entered well before the window, closed inside it (+5 on
+    # $100 of entry capital).
+    s.save_trade(_trade(now - 20 * day, "BUY", price=100.0))
+    s.save_trade(_trade(now - 3 * day, "SELL", price=105.0))
+    # ETH position opened inside the window and still open — $500 deployed that
+    # has realized nothing yet.
+    s.save_trade(_trade(now - 2 * day, "BUY", price=50.0, product="ETH-USD", qty=10.0))
+    # Marks framing the window: BTC 100 -> 110, ETH 50 -> 55.
+    s.save_signal(now - 6 * day, "BTC-USD", "HOLD", 100.0, "mark")
+    s.save_signal(now - 60, "BTC-USD", "HOLD", 110.0, "mark")
+    s.save_signal(now - 6 * day, "ETH-USD", "HOLD", 50.0, "mark")
+    s.save_signal(now - 60, "ETH-USD", "HOLD", 55.0, "mark")
+    s.close()
+    os.chdir(str(tmp_path))
+
+    status = write_status.collect_metrics(now)
+    bm = status["benchmark"]
+
+    assert status["pnl"] == 5.0
+    # The BTC round trip's own entry capital, not the still-open ETH $500.
+    assert bm["deployed_notional"] == 100.0
+    assert bm["strategy_pnl"] == 5.0
+    assert bm["buy_hold_pnl"] == 10.0          # 100 * (110/100 - 1), BTC only
+    assert bm["strategy_return_pct"] == 5.0    # was 1.0 (5 / 500 of ETH capital)
+    assert bm["buy_hold_return_pct"] == 10.0
+    assert bm["alpha_pct"] == -5.0
+
+
+def test_no_benchmark_when_nothing_closed_in_window(tmp_path):
+    """An entry with no exit yet has realized nothing, so there is no
+    return-on-capital to benchmark — omitted rather than divided by capital
+    that hasn't reported."""
+    now = 2_000_000_000.0
+    s = Storage(os.path.join(str(tmp_path), "trading.open.db"))
+    s.save_trade(_trade(now - 86_400, "BUY", price=100.0))
+    s.save_signal(now - 60, "BTC-USD", "HOLD", 110.0, "mark")
+    s.close()
+    os.chdir(str(tmp_path))
+    assert "benchmark" not in write_status.collect_metrics(now)
