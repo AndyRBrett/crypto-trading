@@ -27,7 +27,7 @@ Two further enrichments turn raw numbers into evaluable signal:
   strategy beats passively holding the same coins. Using per-symbol mark prices
   at the window's start and end (from the trade + signal logs), weighted by the
   entry notional behind the round trips that closed in the window — the very
-  capital that earned the reported P&L (issue #66) — it reports
+  capital that earned the reported P&L (#66) — it reports
   ``strategy_return_pct`` vs. ``buy_hold_return_pct`` and the ``alpha_pct``
   between them, plus a small rolling ``equity_curve`` for a dashboard chart.
 * A per-signal decision log (issue #23): ``rejection_reasons`` (a count of why
@@ -245,7 +245,7 @@ def collect_metrics(now: float | None = None) -> dict:
     # Buy-and-hold benchmark accumulators over the headline window (issue #22).
     # Keyed on the round trips that *closed* in the window — the same trades
     # whose realized P&L makes up `pnl` — so the benchmark's numerator and
-    # denominator describe one set of trades (issue #66).
+    # denominator describe one set of trades (#66).
     closed_basis: dict[str, float] = {}            # entry notional of those round trips
     first_mark: dict[str, tuple[float, float]] = {}  # earliest (ts, price) seen per symbol
     last_mark: dict[str, tuple[float, float]] = {}   # latest (ts, price) seen per symbol
@@ -395,7 +395,7 @@ def collect_metrics(now: float | None = None) -> dict:
                 # by the window's opening legs instead compared one set of
                 # trades against another: a week that closed positions opened
                 # long ago and opened positions still running divided realized
-                # P&L by capital that had realized nothing (issue #66).
+                # P&L by capital that had realized nothing (#66).
                 _mark(t.product_id, ts, t.price)
                 if id(t) in closers:
                     closed_basis[t.product_id] = (
