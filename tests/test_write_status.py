@@ -598,3 +598,71 @@ def test_no_benchmark_when_nothing_closed_in_window(tmp_path):
     s.close()
     os.chdir(str(tmp_path))
     assert "benchmark" not in write_status.collect_metrics(now)
+
+
+def test_open_positions_surface_unrealized_pnl(tmp_path):
+    """A sleeve that wins by holding contributes 0.00 to every realized-only
+    P&L field. On 2026-09-06 the regime account's ETH was up ~11% (+$1,031) and
+    appeared nowhere while pnl_90d read -602.54."""
+    now = 2_000_000_000.0
+    day = 86_400
+    s = Storage(os.path.join(str(tmp_path), "trading.regime.db"))
+    # Bought and never sold: no realized P&L at all.
+    s.save_trade(_trade(now - 20 * day, "BUY", price=100.0, qty=10.0))
+    s.save_signal(now - 60, "BTC-USD", "HOLD", 111.0, "still above the trend MA")
+    s.close()
+    os.chdir(str(tmp_path))
+
+    status = write_status.collect_metrics(now)
+
+    assert status["pnl"] == 0.0            # realized-only fields stay untouched
+    assert status["pnl_90d"] == 0.0
+    op = status["open_positions"]
+    assert op["count"] == 1
+    assert op["cost_basis"] == 1000.0
+    assert op["market_value"] == 1110.0
+    assert op["unrealized_pnl"] == 110.0
+    assert op["by_asset"]["BTC-USD"]["unrealized_pnl"] == 110.0
+    assert op["by_account"] == {"regime": 110.0}   # names the winning sleeve
+
+
+def test_open_positions_absent_when_book_is_flat(tmp_path):
+    now = 2_000_000_000.0
+    day = 86_400
+    s = Storage(os.path.join(str(tmp_path), "trading.flat2.db"))
+    s.save_trade(_trade(now - 3 * day, "BUY", price=100.0))
+    s.save_trade(_trade(now - 2 * day, "SELL", price=110.0))   # closed out
+    s.save_signal(now - 60, "BTC-USD", "HOLD", 110.0, "mark")
+    s.close()
+    os.chdir(str(tmp_path))
+    assert "open_positions" not in write_status.collect_metrics(now)
+
+
+def test_open_short_is_valued_in_the_right_direction(tmp_path):
+    """Shorts profit when price falls; the block must not report the loss a
+    naive (mark - entry) would give."""
+    now = 2_000_000_000.0
+    day = 86_400
+    s = Storage(os.path.join(str(tmp_path), "trading.ls.db"))
+    s.save_trade(_trade(now - 3 * day, "SELL", price=100.0, qty=10.0))  # open short
+    s.save_signal(now - 60, "BTC-USD", "HOLD", 90.0, "mark")
+    s.close()
+    os.chdir(str(tmp_path))
+
+    op = write_status.collect_metrics(now)["open_positions"]
+    assert op["unrealized_pnl"] == 100.0    # short 10 @ 100, now 90 -> +100
+
+
+def test_unpriced_open_position_is_reported_not_dropped(tmp_path):
+    """An open position with no mark must not silently vanish from the block —
+    that would understate the book exactly like the realized-only fields do."""
+    now = 2_000_000_000.0
+    day = 86_400
+    s = Storage(os.path.join(str(tmp_path), "trading.nomark.db"))
+    s.save_trade(_trade(now - 3 * day, "BUY", price=100.0, qty=5.0, product="XRP-USD"))
+    s.close()
+    os.chdir(str(tmp_path))
+
+    op = write_status.collect_metrics(now)["open_positions"]
+    assert op["unpriced"] == ["XRP-USD"]
+    assert "unrealized_pnl" not in op   # nothing priceable to total

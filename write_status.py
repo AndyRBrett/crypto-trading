@@ -36,6 +36,15 @@ Two further enrichments turn raw numbers into evaluable signal:
   Each ``hold``/``rejected`` decision also carries the signed ``thresholds`` it
   logged — how close that signal came to firing — so "6/6 no_signal" is no longer
   an opaque gap.
+* ``open_positions``: the book's still-open positions marked to their latest
+  price — count, cost basis, market value and ``unrealized_pnl``, broken down
+  ``by_asset`` and ``by_account``. Every P&L field above is realized-only, so a
+  sleeve that wins by simply holding contributes 0.00 to all of them; on
+  2026-09-06 the ``regime`` account's ETH was up ~11% (+$1,031) and appeared in
+  no field at all while ``pnl_90d`` read -602.54. This is a point-in-time stock,
+  not a windowed flow, so it is reported alongside those numbers rather than
+  folded into them. Positions with no mark to price them are listed under
+  ``unpriced`` rather than silently dropped.
 * ``exit_reasons`` (issue #52): how the window's round trips actually ended —
   ``stop_loss`` / ``take_profit`` / ``position_aging`` / ``strategy_exit``. The
   counterpart to ``rejection_reasons``: one says why nothing could be entered,
@@ -258,6 +267,12 @@ def collect_metrics(now: float | None = None) -> dict:
 
     closed_legs: list[tuple[float, str, float]] = []   # (ts, product, realized)
 
+    # Open positions at the end of the replay, marked to the latest price.
+    open_by_asset: dict[str, dict[str, float]] = {}
+    open_by_account: dict[str, float] = {}
+    open_count = 0
+    unpriced_positions: set[str] = set()  # open but no mark to value them with
+
     def _mark(product_id: str, ts: float, price: float) -> None:
         """Record a price observation so the window's start/end marks can be found."""
         if product_id not in first_mark or ts < first_mark[product_id][0]:
@@ -281,6 +296,19 @@ def collect_metrics(now: float | None = None) -> dict:
                 ).fetchall()
             except sqlite3.Error:
                 sig_rows = []  # older store without signal_log
+            # Latest mark per product across ALL history, not just the headline
+            # window: an open position still needs pricing even if its product
+            # went quiet. SQLite's bare-column-with-MAX picks the max row.
+            try:
+                latest_marks = {
+                    r["product_id"]: r["price"]
+                    for r in conn.execute(
+                        "SELECT product_id, price, MAX(timestamp) FROM signal_log "
+                        "GROUP BY product_id"
+                    )
+                }
+            except sqlite3.Error:
+                latest_marks = {}
             decisions += _store_decisions(conn, run_since)
             store_equity = [
                 (r["timestamp"], r["equity"])
@@ -356,7 +384,7 @@ def collect_metrics(now: float | None = None) -> dict:
         # Replay the store's log so realized P&L is uniformly on the current
         # formula, then classify each fill as an opening or closing leg —
         # direction-agnostic, so short covers (BUY legs) are counted correctly.
-        store_trades = Portfolio.from_trades(
+        store_pf = Portfolio.from_trades(
             0.0,
             0.0,
             [
@@ -372,7 +400,36 @@ def collect_metrics(now: float | None = None) -> dict:
                 )
                 for r in rows
             ],
-        ).trades
+        )
+        store_trades = store_pf.trades
+        # Positions still open at the end of the replay. Every P&L figure in
+        # this file is realized-only, so a sleeve that is winning by simply
+        # holding contributes 0.00 to all of them — the regime account's ETH,
+        # up ~11% since 2026-08-20, was invisible in a -602.54 `pnl_90d`.
+        # Price them at the last mark and report them as their own block.
+        for pid, pos in store_pf.positions.items():
+            if pos.quantity == 0:
+                continue
+            mark = latest_marks.get(pid)
+            if mark is None:
+                unpriced_positions.add(pid)
+                continue
+            entry = abs(pos.quantity) * pos.avg_price
+            value = abs(pos.quantity) * mark
+            # Reuse the portfolio's own formula (signed quantity handles shorts,
+            # and it nets off the fees already paid to open) rather than
+            # restating it here and risking two conventions.
+            unreal = store_pf.unrealized_pnl({pid: mark})
+            slot = open_by_asset.setdefault(
+                pid, {"cost_basis": 0.0, "market_value": 0.0, "unrealized_pnl": 0.0}
+            )
+            slot["cost_basis"] += entry
+            slot["market_value"] += value
+            slot["unrealized_pnl"] += unreal
+            open_by_account[_account_name(path)] = (
+                open_by_account.get(_account_name(path), 0.0) + unreal
+            )
+            open_count += 1
         closers = {id(t) for t in closing_legs(store_trades)}
         leg_basis = closing_leg_basis(store_trades)
         for t in store_trades:
@@ -465,6 +522,38 @@ def collect_metrics(now: float | None = None) -> dict:
         risk = risk_metrics(risk_curve, now=now)
         if risk:
             status["risk_metrics"] = risk
+        # Open positions marked to market. This is a point-in-time *stock*, not
+        # a windowed flow like `pnl` / `pnl_30d` / `pnl_90d` — those stay
+        # realized-only and are deliberately not adjusted by it. Reported
+        # separately so a book that is winning by holding stops reading as a
+        # book that is losing: on 2026-09-06 the tactical sleeves' -602.54
+        # realized over 90 days sat alongside +1,091 of open gain that appeared
+        # in no field at all.
+        if open_by_asset or unpriced_positions:
+            block: dict = {"count": open_count}
+            if open_by_asset:
+                block["cost_basis"] = round(
+                    sum(v["cost_basis"] for v in open_by_asset.values()), 2
+                )
+                block["market_value"] = round(
+                    sum(v["market_value"] for v in open_by_asset.values()), 2
+                )
+                block["unrealized_pnl"] = round(
+                    sum(v["unrealized_pnl"] for v in open_by_asset.values()), 2
+                )
+                block["by_asset"] = {
+                    pid: {k: round(v, 2) for k, v in vals.items()}
+                    for pid, vals in sorted(open_by_asset.items())
+                }
+                # Which sleeve the open gain belongs to — the question
+                # `attribution` answers for realized P&L.
+                block["by_account"] = {
+                    name: round(v, 2) for name, v in sorted(open_by_account.items())
+                }
+            # Never let an unpriceable position silently understate the block.
+            if unpriced_positions:
+                block["unpriced"] = sorted(unpriced_positions)
+            status["open_positions"] = block
     if exit_kinds:
         status["exit_reasons"] = dict(sorted(exit_kinds.items()))
     if breaker_tripped:

@@ -268,6 +268,11 @@ plus 30- and 90-day totals:
                  "buy_hold_pnl": 7.7, "strategy_return_pct": 1.45,
                  "buy_hold_return_pct": 0.8, "alpha_pct": 0.65 },
   "equity_curve": [ { "t": "...Z", "equity": 1000.0 }, { "t": "...Z", "equity": 1014.01 } ],
+  "open_positions": { "count": 1, "cost_basis": 966.0, "market_value": 1002.5,
+                      "unrealized_pnl": 36.5,
+                      "by_asset": { "BTC-USD": { "cost_basis": 966.0, "market_value": 1002.5,
+                                                 "unrealized_pnl": 36.5 } },
+                      "by_account": { "regime": 36.5 } },
   "risk_metrics": { "window_days": 30, "samples": 29, "max_drawdown_pct": 4.20,
                     "volatility_pct": 31.4, "sharpe": 0.82, "sortino": 1.15 },
   "signals_evaluated": 6, "signals_acted": 2,
@@ -300,7 +305,14 @@ P&L is `pnl`), and reports the strategy's return against that buy-and-hold
 return plus the `alpha_pct` between them (omitted when nothing closed in the
 window). Both legs therefore describe one set of trades; positions opened but
 still open are in neither, since they have realized nothing yet.
-`equity_curve` is a small rolling series for a dashboard chart. The decision log
+`open_positions` marks the still-open book to its latest price and reports the
+`unrealized_pnl` on it, split `by_asset` and `by_account`. Every P&L field above
+it is realized-only, so a sleeve that wins by holding contributes 0.00 to all of
+them — a stay-invested account up 11% on an unclosed position is otherwise
+invisible next to a negative `pnl_90d`. It is a point-in-time stock rather than a
+windowed flow, so it sits alongside those numbers instead of being folded into
+them; open positions that can't be priced are listed under `unpriced` rather than
+quietly omitted. `equity_curve` is a small rolling series for a dashboard chart. The decision log
 accounts for every evaluated signal: `decisions` lists each one's `outcome`
 (`acted` / `rejected` / `hold`) and `reject_code`, `rejection_reasons` tallies
 why signals didn't trade (e.g. `no_signal`, `size_zero`, `max_open_positions`),
