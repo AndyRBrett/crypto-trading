@@ -43,8 +43,11 @@ Two further enrichments turn raw numbers into evaluable signal:
   2026-09-06 the ``regime`` account's ETH was up ~11% (+$1,031) and appeared in
   no field at all while ``pnl_90d`` read -602.54. This is a point-in-time stock,
   not a windowed flow, so it is reported alongside those numbers rather than
-  folded into them. Positions with no mark to price them are listed under
-  ``unpriced`` rather than silently dropped.
+  folded into them. ``count`` covers every open position; those with no mark to
+  price them are additionally listed under ``unpriced`` rather than silently
+  dropped. Stores the bot no longer runs are retired from the totals on the same
+  liveness cutoff ``_merge_equity`` uses, and named under ``retired_accounts``
+  when one still holds something.
 * ``exit_reasons`` (issue #52): how the window's round trips actually ended —
   ``stop_loss`` / ``take_profit`` / ``position_aging`` / ``strategy_exit``. The
   counterpart to ``rejection_reasons``: one says why nothing could be entered,
@@ -272,6 +275,7 @@ def collect_metrics(now: float | None = None) -> dict:
     open_by_account: dict[str, float] = {}
     open_count = 0
     unpriced_positions: set[str] = set()  # open but no mark to value them with
+    retired_with_positions: set[str] = set()  # dead stores still holding something
 
     def _mark(product_id: str, ts: float, price: float) -> None:
         """Record a price observation so the window's start/end marks can be found."""
@@ -309,6 +313,24 @@ def collect_metrics(now: float | None = None) -> dict:
                 }
             except sqlite3.Error:
                 latest_marks = {}
+            # When this store last did anything at all. A store the bot no
+            # longer runs (an account dropped from config, the legacy
+            # single-account trading.db) keeps its file and its last open
+            # position forever; `_merge_equity` already retires such stores
+            # from the equity curve, and open positions need the same cutoff or
+            # a dead account's holding is reported as live indefinitely.
+            # Signals are logged every tick for every product even when equity
+            # can't be snapshotted (issue #50), so they are the better liveness
+            # signal of the two; fall back to equity for a store predating
+            # signal_log.
+            store_last_seen = 0.0
+            for table in ("signal_log", "equity"):
+                try:
+                    ts = conn.execute(f"SELECT MAX(timestamp) FROM {table}").fetchone()[0]
+                except sqlite3.Error:
+                    continue
+                if ts:
+                    store_last_seen = max(store_last_seen, float(ts))
             decisions += _store_decisions(conn, run_since)
             store_equity = [
                 (r["timestamp"], r["equity"])
@@ -407,9 +429,24 @@ def collect_metrics(now: float | None = None) -> dict:
         # holding contributes 0.00 to all of them — the regime account's ETH,
         # up ~11% since 2026-08-20, was invisible in a -602.54 `pnl_90d`.
         # Price them at the last mark and report them as their own block.
+        # A store that has not ticked for a whole reporting window is retired,
+        # not merely quiet — its last position is a fossil, and counting it
+        # would inflate the live book's exposure forever. A fill counts as
+        # liveness too, so a store is only retired when signals, equity
+        # snapshots AND trades have all gone quiet for the window.
+        if store_trades:
+            store_last_seen = max(store_last_seen, store_trades[-1].timestamp)
+        store_live = store_last_seen >= head_start
         for pid, pos in store_pf.positions.items():
             if pos.quantity == 0:
                 continue
+            if not store_live:
+                retired_with_positions.add(_account_name(path))
+                continue
+            # Counted before pricing: `count` is every open position, so a
+            # holding with no mark still shows up in it rather than leaving
+            # `count: 0` next to a non-empty `unpriced` list.
+            open_count += 1
             mark = latest_marks.get(pid)
             if mark is None:
                 unpriced_positions.add(pid)
@@ -429,7 +466,6 @@ def collect_metrics(now: float | None = None) -> dict:
             open_by_account[_account_name(path)] = (
                 open_by_account.get(_account_name(path), 0.0) + unreal
             )
-            open_count += 1
         closers = {id(t) for t in closing_legs(store_trades)}
         leg_basis = closing_leg_basis(store_trades)
         for t in store_trades:
@@ -529,7 +565,7 @@ def collect_metrics(now: float | None = None) -> dict:
         # book that is losing: on 2026-09-06 the tactical sleeves' -602.54
         # realized over 90 days sat alongside +1,091 of open gain that appeared
         # in no field at all.
-        if open_by_asset or unpriced_positions:
+        if open_by_asset or unpriced_positions or retired_with_positions:
             block: dict = {"count": open_count}
             if open_by_asset:
                 block["cost_basis"] = round(
@@ -553,6 +589,11 @@ def collect_metrics(now: float | None = None) -> dict:
             # Never let an unpriceable position silently understate the block.
             if unpriced_positions:
                 block["unpriced"] = sorted(unpriced_positions)
+            # Excluded from every figure above, but named: a retired account
+            # still holding something is worth knowing about precisely because
+            # nothing is managing it any more.
+            if retired_with_positions:
+                block["retired_accounts"] = sorted(retired_with_positions)
             status["open_positions"] = block
     if exit_kinds:
         status["exit_reasons"] = dict(sorted(exit_kinds.items()))

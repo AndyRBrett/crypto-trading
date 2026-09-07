@@ -311,8 +311,11 @@ it is realized-only, so a sleeve that wins by holding contributes 0.00 to all of
 them — a stay-invested account up 11% on an unclosed position is otherwise
 invisible next to a negative `pnl_90d`. It is a point-in-time stock rather than a
 windowed flow, so it sits alongside those numbers instead of being folded into
-them; open positions that can't be priced are listed under `unpriced` rather than
-quietly omitted. `equity_curve` is a small rolling series for a dashboard chart. The decision log
+them; `count` covers every open position, and those that can't be priced are also
+listed under `unpriced` rather than quietly omitted. A store the bot no longer
+runs is retired from the totals — otherwise a dead account's last holding would
+inflate the live book's exposure forever — and named under `retired_accounts` if
+it still holds something. `equity_curve` is a small rolling series for a dashboard chart. The decision log
 accounts for every evaluated signal: `decisions` lists each one's `outcome`
 (`acted` / `rejected` / `hold`) and `reject_code`, `rejection_reasons` tallies
 why signals didn't trade (e.g. `no_signal`, `size_zero`, `max_open_positions`),
