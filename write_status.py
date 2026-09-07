@@ -36,6 +36,18 @@ Two further enrichments turn raw numbers into evaluable signal:
   Each ``hold``/``rejected`` decision also carries the signed ``thresholds`` it
   logged — how close that signal came to firing — so "6/6 no_signal" is no longer
   an opaque gap.
+* ``open_positions``: the book's still-open positions marked to their latest
+  price — count, cost basis, market value and ``unrealized_pnl``, broken down
+  ``by_asset`` and ``by_account``. Every P&L field above is realized-only, so a
+  sleeve that wins by simply holding contributes 0.00 to all of them; on
+  2026-09-06 the ``regime`` account's ETH was up ~11% (+$1,031) and appeared in
+  no field at all while ``pnl_90d`` read -602.54. This is a point-in-time stock,
+  not a windowed flow, so it is reported alongside those numbers rather than
+  folded into them. ``count`` covers every open position; those with no mark to
+  price them are additionally listed under ``unpriced`` rather than silently
+  dropped. Stores the bot no longer runs are retired from the totals on the same
+  liveness cutoff ``_merge_equity`` uses, and named under ``retired_accounts``
+  when one still holds something.
 * ``exit_reasons`` (issue #52): how the window's round trips actually ended —
   ``stop_loss`` / ``take_profit`` / ``position_aging`` / ``strategy_exit``. The
   counterpart to ``rejection_reasons``: one says why nothing could be entered,
@@ -258,6 +270,13 @@ def collect_metrics(now: float | None = None) -> dict:
 
     closed_legs: list[tuple[float, str, float]] = []   # (ts, product, realized)
 
+    # Open positions at the end of the replay, marked to the latest price.
+    open_by_asset: dict[str, dict[str, float]] = {}
+    open_by_account: dict[str, float] = {}
+    open_count = 0
+    unpriced_positions: set[str] = set()  # open but no mark to value them with
+    retired_with_positions: set[str] = set()  # dead stores still holding something
+
     def _mark(product_id: str, ts: float, price: float) -> None:
         """Record a price observation so the window's start/end marks can be found."""
         if product_id not in first_mark or ts < first_mark[product_id][0]:
@@ -281,6 +300,37 @@ def collect_metrics(now: float | None = None) -> dict:
                 ).fetchall()
             except sqlite3.Error:
                 sig_rows = []  # older store without signal_log
+            # Latest mark per product across ALL history, not just the headline
+            # window: an open position still needs pricing even if its product
+            # went quiet. SQLite's bare-column-with-MAX picks the max row.
+            try:
+                latest_marks = {
+                    r["product_id"]: r["price"]
+                    for r in conn.execute(
+                        "SELECT product_id, price, MAX(timestamp) FROM signal_log "
+                        "GROUP BY product_id"
+                    )
+                }
+            except sqlite3.Error:
+                latest_marks = {}
+            # When this store last did anything at all. A store the bot no
+            # longer runs (an account dropped from config, the legacy
+            # single-account trading.db) keeps its file and its last open
+            # position forever; `_merge_equity` already retires such stores
+            # from the equity curve, and open positions need the same cutoff or
+            # a dead account's holding is reported as live indefinitely.
+            # Signals are logged every tick for every product even when equity
+            # can't be snapshotted (issue #50), so they are the better liveness
+            # signal of the two; fall back to equity for a store predating
+            # signal_log.
+            store_last_seen = 0.0
+            for table in ("signal_log", "equity"):
+                try:
+                    ts = conn.execute(f"SELECT MAX(timestamp) FROM {table}").fetchone()[0]
+                except sqlite3.Error:
+                    continue
+                if ts:
+                    store_last_seen = max(store_last_seen, float(ts))
             decisions += _store_decisions(conn, run_since)
             store_equity = [
                 (r["timestamp"], r["equity"])
@@ -356,7 +406,7 @@ def collect_metrics(now: float | None = None) -> dict:
         # Replay the store's log so realized P&L is uniformly on the current
         # formula, then classify each fill as an opening or closing leg —
         # direction-agnostic, so short covers (BUY legs) are counted correctly.
-        store_trades = Portfolio.from_trades(
+        store_pf = Portfolio.from_trades(
             0.0,
             0.0,
             [
@@ -372,7 +422,50 @@ def collect_metrics(now: float | None = None) -> dict:
                 )
                 for r in rows
             ],
-        ).trades
+        )
+        store_trades = store_pf.trades
+        # Positions still open at the end of the replay. Every P&L figure in
+        # this file is realized-only, so a sleeve that is winning by simply
+        # holding contributes 0.00 to all of them — the regime account's ETH,
+        # up ~11% since 2026-08-20, was invisible in a -602.54 `pnl_90d`.
+        # Price them at the last mark and report them as their own block.
+        # A store that has not ticked for a whole reporting window is retired,
+        # not merely quiet — its last position is a fossil, and counting it
+        # would inflate the live book's exposure forever. A fill counts as
+        # liveness too, so a store is only retired when signals, equity
+        # snapshots AND trades have all gone quiet for the window.
+        if store_trades:
+            store_last_seen = max(store_last_seen, store_trades[-1].timestamp)
+        store_live = store_last_seen >= head_start
+        for pid, pos in store_pf.positions.items():
+            if pos.quantity == 0:
+                continue
+            if not store_live:
+                retired_with_positions.add(_account_name(path))
+                continue
+            # Counted before pricing: `count` is every open position, so a
+            # holding with no mark still shows up in it rather than leaving
+            # `count: 0` next to a non-empty `unpriced` list.
+            open_count += 1
+            mark = latest_marks.get(pid)
+            if mark is None:
+                unpriced_positions.add(pid)
+                continue
+            entry = abs(pos.quantity) * pos.avg_price
+            value = abs(pos.quantity) * mark
+            # Reuse the portfolio's own formula (signed quantity handles shorts,
+            # and it nets off the fees already paid to open) rather than
+            # restating it here and risking two conventions.
+            unreal = store_pf.unrealized_pnl({pid: mark})
+            slot = open_by_asset.setdefault(
+                pid, {"cost_basis": 0.0, "market_value": 0.0, "unrealized_pnl": 0.0}
+            )
+            slot["cost_basis"] += entry
+            slot["market_value"] += value
+            slot["unrealized_pnl"] += unreal
+            open_by_account[_account_name(path)] = (
+                open_by_account.get(_account_name(path), 0.0) + unreal
+            )
         closers = {id(t) for t in closing_legs(store_trades)}
         leg_basis = closing_leg_basis(store_trades)
         for t in store_trades:
@@ -465,6 +558,43 @@ def collect_metrics(now: float | None = None) -> dict:
         risk = risk_metrics(risk_curve, now=now)
         if risk:
             status["risk_metrics"] = risk
+        # Open positions marked to market. This is a point-in-time *stock*, not
+        # a windowed flow like `pnl` / `pnl_30d` / `pnl_90d` — those stay
+        # realized-only and are deliberately not adjusted by it. Reported
+        # separately so a book that is winning by holding stops reading as a
+        # book that is losing: on 2026-09-06 the tactical sleeves' -602.54
+        # realized over 90 days sat alongside +1,091 of open gain that appeared
+        # in no field at all.
+        if open_by_asset or unpriced_positions or retired_with_positions:
+            block: dict = {"count": open_count}
+            if open_by_asset:
+                block["cost_basis"] = round(
+                    sum(v["cost_basis"] for v in open_by_asset.values()), 2
+                )
+                block["market_value"] = round(
+                    sum(v["market_value"] for v in open_by_asset.values()), 2
+                )
+                block["unrealized_pnl"] = round(
+                    sum(v["unrealized_pnl"] for v in open_by_asset.values()), 2
+                )
+                block["by_asset"] = {
+                    pid: {k: round(v, 2) for k, v in vals.items()}
+                    for pid, vals in sorted(open_by_asset.items())
+                }
+                # Which sleeve the open gain belongs to — the question
+                # `attribution` answers for realized P&L.
+                block["by_account"] = {
+                    name: round(v, 2) for name, v in sorted(open_by_account.items())
+                }
+            # Never let an unpriceable position silently understate the block.
+            if unpriced_positions:
+                block["unpriced"] = sorted(unpriced_positions)
+            # Excluded from every figure above, but named: a retired account
+            # still holding something is worth knowing about precisely because
+            # nothing is managing it any more.
+            if retired_with_positions:
+                block["retired_accounts"] = sorted(retired_with_positions)
+            status["open_positions"] = block
     if exit_kinds:
         status["exit_reasons"] = dict(sorted(exit_kinds.items()))
     if breaker_tripped:

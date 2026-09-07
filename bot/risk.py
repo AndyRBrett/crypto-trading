@@ -18,7 +18,9 @@ DUST_NOTIONAL = 10.0
 
 # Every stop exit reason starts with this (long: "Stop-loss:", short:
 # "Stop-loss (short):"), including trailing-stop exits — it's the contract the
-# re-entry cooldown keys off, so keep protective_exit_reason in sync.
+# re-entry cooldown keys off, so keep protective_exit_reason in sync. Note the
+# cooldown additionally requires the stop to have *lost* money; see
+# reentry_cooldown_active for why.
 STOP_REASON_PREFIX = "Stop-loss"
 
 
@@ -38,6 +40,16 @@ def reentry_cooldown_active(
     the fresh-VM-per-tick cloud runs — no extra state to persist. A normal
     exit (take-profit / strategy SELL) resets nothing: only stops start a
     cooldown. Disabled by default (``reentry_cooldown_bars = 0``).
+
+    Only a stop that *lost* money starts one. ``STOP_REASON_PREFIX`` also
+    covers trailing-stop exits, and a trailing stop that fires in profit is the
+    strategy working — the position ran, the stop ratcheted up behind it, and
+    it banked the gain. Re-entering straight after that is a fresh signal, not
+    a whipsaw. Keying off the prefix alone would have blocked the breakout
+    account's SOL re-entry of 2026-08-22 06:18 — taken 62 minutes after a
+    trailing stop banked +$99.89, and itself worth a further +$70.29. The
+    failure mode this guard exists for is re-entering right after being proven
+    *wrong*, so that is what it keys on.
     """
     bars = getattr(cfg, "reentry_cooldown_bars", 0) or 0
     if bars <= 0 or not bar_seconds:
@@ -50,6 +62,8 @@ def reentry_cooldown_active(
         return False
     if not str(last.reasons[0]).startswith(STOP_REASON_PREFIX):
         return False
+    if getattr(last, "realized_pnl", 0.0) >= 0:
+        return False  # a trailing stop that banked a gain is not a whipsaw
     return (now - last.timestamp) < bars * bar_seconds
 
 

@@ -156,3 +156,61 @@ def test_normal_exit_starts_no_cooldown():
     sig = Signal(product_id="BTC-USD", action=BUY, price=108.0, indicators={"atr": 2.0})
     trade, code = eng._manage(sig, 108.0, [], {"BTC-USD": 108.0})
     assert code == ACTED and trade is not None
+
+
+def test_profitable_trailing_stop_starts_no_cooldown():
+    """A trailing stop that fires in profit is the strategy working, not a
+    whipsaw — re-entry after it must stay allowed.
+
+    Real fills from trading.breakout.db (bot-state branch): SOL-USD was entered
+    at $85.56 and exited 2026-08-22 05:16 on a trailing stop at $96.46 for
+    +$99.89. The account re-entered 62 minutes later at 06:18 and that position
+    went on to make a further +$70.29. Keying the cooldown off the "Stop-loss"
+    reason alone would have blocked the best trade of the quarter.
+    """
+    eng = make_engine(
+        starting_cash=10_000,
+        products=["SOL-USD"],
+        candle_granularity="ONE_DAY",
+        reentry_cooldown_bars=1,
+    )
+    eng.storage = FakeStorage()
+    now = time.time()
+    eng.portfolio.execute(BUY, "SOL-USD", 85.56, 17.45, timestamp=now - 3 * 86_400)
+    exit_trade = eng.portfolio.execute(
+        SELL, "SOL-USD", 96.46, 17.45, timestamp=now - 3_720,  # 62 min ago
+        reasons=["Stop-loss: price $92.35 hit stop $96.46 (entry $85.56) — "
+                 "cutting the loss / locking in gains."],
+    )
+    assert exit_trade.realized_pnl > 0  # the stop banked a gain
+
+    sig = Signal(product_id="SOL-USD", action=BUY, price=93.71,
+                 indicators={"atr": 4.9})
+    trade, code = eng._manage(sig, 93.71, [], {"SOL-USD": 93.71})
+    assert code == ACTED
+    assert trade is not None and trade.side == BUY
+
+
+def test_losing_stop_still_starts_a_cooldown_at_the_same_gap():
+    """Control for the test above: same 62-minute gap, same reason prefix, but
+    the stop realized a loss — that one is the whipsaw, and stays blocked."""
+    eng = make_engine(
+        starting_cash=10_000,
+        products=["SOL-USD"],
+        candle_granularity="ONE_DAY",
+        reentry_cooldown_bars=1,
+    )
+    eng.storage = FakeStorage()
+    now = time.time()
+    eng.portfolio.execute(BUY, "SOL-USD", 96.46, 17.45, timestamp=now - 3 * 86_400)
+    exit_trade = eng.portfolio.execute(
+        SELL, "SOL-USD", 85.56, 17.45, timestamp=now - 3_720,
+        reasons=["Stop-loss: price $85.56 hit stop $85.60 (entry $96.46) — "
+                 "cutting the loss / locking in gains."],
+    )
+    assert exit_trade.realized_pnl < 0
+
+    sig = Signal(product_id="SOL-USD", action=BUY, price=86.0,
+                 indicators={"atr": 4.9})
+    trade, code = eng._manage(sig, 86.0, [], {"SOL-USD": 86.0})
+    assert trade is None and code == REENTRY_COOLDOWN
