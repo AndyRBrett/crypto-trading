@@ -9,7 +9,8 @@ is opened for review, when a draft is marked ready, or on a
 `@codex review` comment. Findings come back as comments from
 chatgpt-codex-connector[bot]; a clean pass is just a 👍 reaction.
 
-- Do not merge right after opening a PR. Open it, then stop.
+- Default: do not merge right after opening a PR — open it, then
+  stop. If I say to merge, merge.
 - Once the review lands, run `gh pr view <n> --comments` and triage
   each finding: real bug / not applicable / style-only. Tell me your
   call and reasoning before changing code.
