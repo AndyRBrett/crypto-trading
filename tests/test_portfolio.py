@@ -5,6 +5,7 @@ from bot.portfolio import (
     InsufficientPosition,
     Portfolio,
     Trade,
+    closing_leg_basis,
     closing_legs,
 )
 from bot.strategy import BUY, SELL
@@ -205,3 +206,36 @@ def test_closing_legs_direction_agnostic():
         ("BTC-USD", "SELL"), ("ETH-USD", "BUY"),
     ]
     assert all(t.realized_pnl == 10.0 for t in legs)
+
+
+def test_closing_leg_basis_uses_averaged_entry_price():
+    """The capital a round trip put to work is its averaged *entry* notional —
+    what any return-on-capital figure has to divide by (#66)."""
+    trades = [
+        Trade(timestamp=1, product_id="BTC-USD", side="BUY", price=100.0,
+              quantity=1.0, fee=0.0, cash_after=0.0),
+        Trade(timestamp=2, product_id="BTC-USD", side="BUY", price=200.0,
+              quantity=1.0, fee=0.0, cash_after=0.0),   # avg entry now 150
+        Trade(timestamp=3, product_id="BTC-USD", side="SELL", price=300.0,
+              quantity=1.0, fee=0.0, cash_after=0.0),   # partial close
+        Trade(timestamp=4, product_id="BTC-USD", side="SELL", price=400.0,
+              quantity=1.0, fee=0.0, cash_after=0.0),   # rest, same avg entry
+    ]
+    basis = closing_leg_basis(trades)
+    assert [basis[id(t)] for t in trades if id(t) in basis] == [150.0, 150.0]
+    # One entry per closing leg, and only for closing legs.
+    assert len(basis) == 2
+    assert {id(t) for t in closing_legs(trades)} == set(basis)
+
+
+def test_closing_leg_basis_covers_shorts():
+    """A short's realized P&L rides on the covering BUY; its basis is the
+    short entry, not the cover price."""
+    trades = [
+        Trade(timestamp=1, product_id="ETH-USD", side="SELL", price=50.0,
+              quantity=2.0, fee=0.0, cash_after=0.0),   # open short, basis 100
+        Trade(timestamp=2, product_id="ETH-USD", side="BUY", price=40.0,
+              quantity=2.0, fee=0.0, cash_after=0.0),   # cover
+    ]
+    basis = closing_leg_basis(trades)
+    assert basis == {id(trades[1]): 100.0}

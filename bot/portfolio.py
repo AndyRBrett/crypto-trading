@@ -267,3 +267,47 @@ def closing_legs(trades: list[Trade]) -> list[Trade]:
             exits.append(t)
         running[t.product_id] = pos + signed
     return exits
+
+
+def closing_leg_basis(trades: list[Trade]) -> dict[int, float]:
+    """Entry cost basis behind each closing leg, keyed by ``id(trade)``.
+
+    For every fill ``closing_legs`` returns, this is the capital that round trip
+    actually put to work: the position's average entry price times the quantity
+    being closed. Realized P&L is booked on the closing leg, so its *entry*
+    notional is the only denominator a return-on-that-capital figure can divide
+    by — the exit notional bakes in the P&L, and a window's opening legs are a
+    different set of trades entirely.
+
+    Same signed-position replay as ``closing_legs``, extended to carry the
+    average entry price the way ``Portfolio._apply`` does (adds average in;
+    a partial close leaves the average untouched).
+    """
+    basis: dict[int, float] = {}
+    qty: dict[str, float] = {}  # signed position per product
+    avg: dict[str, float] = {}  # average entry price per product
+    for t in sorted(trades, key=lambda x: x.timestamp):
+        pos = qty.get(t.product_id, 0.0)
+        signed = t.quantity if t.side == BUY else -t.quantity
+        if pos != 0 and (pos > 0) != (signed > 0):  # reducing toward zero
+            closed = min(t.quantity, abs(pos))
+            basis[id(t)] = avg.get(t.product_id, 0.0) * closed
+            new = pos + signed
+            if abs(new) <= 1e-9:
+                qty[t.product_id], avg[t.product_id] = 0.0, 0.0
+            else:
+                # A fill big enough to flip through zero opens the other side at
+                # its own price; a partial close keeps the existing average.
+                if (new > 0) != (pos > 0):
+                    avg[t.product_id] = t.price
+                qty[t.product_id] = new
+        else:  # opening / adding
+            mag = abs(pos)
+            new_mag = mag + t.quantity
+            avg[t.product_id] = (
+                (avg.get(t.product_id, 0.0) * mag + t.price * t.quantity) / new_mag
+                if new_mag
+                else 0.0
+            )
+            qty[t.product_id] = pos + signed
+    return basis
