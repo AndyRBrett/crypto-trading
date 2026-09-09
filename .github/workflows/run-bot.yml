@@ -16,6 +16,30 @@ on:
     - cron: "0 * * * *"
   workflow_dispatch: {} # lets you trigger a run by hand from the Actions tab
 
+  # External scheduler (cron-job.org) pings this through the GitHub API; see
+  # "Reliable scheduling" in the README for the request it sends.
+  #
+  # GitHub runs `schedule:` events best-effort and drops most of them under
+  # load. Measured on this repo: 100 runs against 353 expected hourly slots
+  # (28%), median gap 3.2h, worst 12.3h — every one of those runs SUCCEEDED,
+  # so the throttling is invisible in the Actions tab. That matters here
+  # because the cron comment above justifies hourly by saying stops react
+  # "within the hour"; at a 12h worst-case gap a 2.0x-ATR stop is nothing of
+  # the sort. API-dispatched runs are not throttled that way.
+  #
+  # The `schedule:` block above deliberately STAYS as a fallback. In the
+  # ufc-dashboard repo cron-job.org disabled a job after 26 consecutive
+  # failures, and because that job was the only trigger the data went stale
+  # for a day. A throttled backup is worth far more than no backup.
+  #
+  # Deliberately `repository_dispatch` and NOT `workflow_dispatch`: the status
+  # publish step below always publishes on `workflow_dispatch` ("a manual run
+  # always publishes"), so an hourly external ping on that event would commit
+  # overseer-status.json ~24x a day and bury main's history. On this event the
+  # normal MIN_AGE_HOURS gate applies, exactly as for a scheduled run.
+  repository_dispatch:
+    types: [tick]
+
 # Allow the built-in token to push to gh-pages and the bot-state branch.
 permissions:
   contents: write

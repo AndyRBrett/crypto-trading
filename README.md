@@ -216,14 +216,97 @@ Setup:
 2. **(Optional) Add your Anthropic key** for Claude explanations: repo →
    Settings → Secrets and variables → Actions → New repository secret →
    `ANTHROPIC_API_KEY`. Without it, the cloud bot uses the templated rationale.
-   No GitHub token needed — Actions provides one automatically.
+   No GitHub token needed for the bot itself — Actions provides one
+   automatically. (The external trigger in *Reliable scheduling* below is the
+   one exception: it authenticates from outside Actions, so it needs its own.)
 3. **Kick off the first run:** Actions tab → "Run trading bot (always-on)" →
-   *Run workflow*. After that it runs every 15 minutes on its own (entries use
-   hourly candles; the frequent checks keep stop-losses responsive).
+   *Run workflow*. After that it ticks hourly on its own (entries are decided on
+   settled **daily** candles, so hourly is plenty — the point of checking every
+   hour is to keep stop-losses and trailing stops responsive, not to catch new
+   entries sooner).
+4. **Set up the external trigger** below. Without it GitHub's scheduler drops
+   most of those hourly ticks.
 
 Notes:
-- Cron timing is approximate (GitHub may delay a run by several minutes).
 - Edit `config.ci.yaml` to change what the cloud bot trades or how it behaves.
+
+### Reliable scheduling (cron-job.org)
+
+**GitHub's `schedule:` cron is best-effort and drops most runs under load.**
+Measured on this repo: **100 runs against 353 expected hourly slots (28%)**,
+median gap **3.2h**, worst **12.3h**. Every one of those runs *succeeded* — the
+throttling never appears as a failure, so the Actions tab looks perfectly
+healthy while the bot is actually ticking a third as often as configured.
+
+That is a risk problem, not a cosmetic one. `stop_loss_atr_mult: 2.0` is sized
+on the assumption that price is checked hourly; at a 12-hour worst-case gap the
+stop is nothing of the sort. (It is *not* why the bot goes quiet for days — that
+is the `heartbeat_days` alert doing its job while the book sits fully invested.)
+
+Runs dispatched through the **GitHub API are not throttled this way**, so an
+external scheduler pinging the API keeps the ticks actually happening.
+`run-bot.yml` accepts a `repository_dispatch` event of type `tick` for this.
+
+**This needs no server and no third-party infrastructure beyond cron-job.org —
+cron-job.org calls the GitHub API directly.**
+
+Setup:
+
+1. **Create a token:** GitHub → Settings → Developer settings → **Fine-grained
+   tokens** → repository access: *only* `AndyRBrett/crypto-trading` →
+   Permissions → **Actions: Read and write**. Nothing else is needed. Set an
+   expiry you will actually notice, and put a reminder in your calendar — an
+   expired token is silent (see *When the trigger dies* below).
+2. **Create the cron job** at [cron-job.org](https://cron-job.org):
+   - **URL:** `https://api.github.com/repos/AndyRBrett/crypto-trading/dispatches`
+   - **Schedule:** every hour, at minute 30 (offset from the built-in `schedule:`
+     at :00 so the two triggers do not collide)
+   - **Method:** `POST`
+   - **Headers:**
+     - `Authorization: Bearer <your token>`
+     - `Accept: application/vnd.github+json`
+     - `Content-Type: application/json`
+   - **Body:** `{"event_type":"tick"}`
+   - Enable "Notify on failure" so a dead token emails you.
+3. **Verify:** save, hit *Test run*, and confirm GitHub returns **204 No
+   Content** and a new run appears in the Actions tab with the trigger shown as
+   `repository_dispatch`.
+
+Free tier is comfortable: unlimited jobs, 1-minute minimum interval, custom
+headers and POST bodies all included. The 30-second timeout and 64 KB response
+cap are irrelevant — the dispatch API answers in well under a second with an
+empty body. (The "100 API calls/day" limit applies to cron-job.org's own
+management API, not to job executions.) GitHub Actions minutes are free and
+unlimited here because this repo is public, so going from ~7 to 24 runs a day
+costs nothing.
+
+**Why `repository_dispatch` and not `workflow_dispatch`:** the status-publish
+step always publishes on `workflow_dispatch` ("a manual run always publishes"),
+so an hourly external ping on that event would commit `overseer-status.json`
+~24x a day and bury `main`'s history. On `repository_dispatch` the normal
+`MIN_AGE_HOURS` gate applies, exactly as for a scheduled run.
+
+**The built-in `schedule:` block stays enabled on purpose.** In the sibling
+`ufc-dashboard` repo, cron-job.org disabled a job after 26 consecutive failures
+— on a fight day — and because that job was the *only* trigger, the data went
+stale until someone noticed. A throttled backup is worth far more than no
+backup. Running both is safe: `concurrency: run-bot` with
+`cancel-in-progress: false` queues a doubled-up tick rather than letting two
+runs fight over the portfolio state.
+
+#### When the trigger dies
+
+The failure mode is silence, so check these in order:
+
+- **`last_run_at` in `overseer-status.json` is hours stale**, or Actions shows
+  gaps — the dispatch is not arriving.
+- **cron-job.org job history** shows the HTTP status of each ping. `401`/`403`
+  means the token expired or was rescoped; `404` usually means the token lost
+  access to the repo (a fine-grained token 404s rather than 403s when it cannot
+  see the repository at all).
+- **Job auto-disabled** after repeated failures — re-enable it after fixing the
+  token. While it is disabled the bot falls back to the throttled `schedule:`,
+  so it keeps trading, just slowly.
 
 ## Laptop as the fast driver (optional)
 
