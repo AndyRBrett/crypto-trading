@@ -312,8 +312,20 @@ runs fight over the portfolio state.
 
 The failure mode is silence, so check these in order:
 
-- **`last_run_at` in `overseer-status.json` is hours stale**, or Actions shows
-  gaps — the dispatch is not arriving.
+- **`updated_at` in the published `state.json`** — the bot rewrites and PUTs
+  this to `gh-pages` on *every* tick (epoch seconds; served at
+  `https://andyrbrett.github.io/crypto-trading/state.json`), so it is the only
+  true per-tick heartbeat here. More than ~2h old means ticks genuinely are not
+  happening.
+- **Actions run cadence.** Runs landing at ~:30 each hour mean the external
+  trigger is working; only irregular runs near :00 mean it has died and the
+  throttled `schedule:` fallback is carrying the bot.
+- ⚠️ **Do *not* use `last_run_at` in `overseer-status.json` for this.** It is
+  stamped when `write_status.py` runs, which only happens once the 20h publish
+  gate passes — so it reads hours stale even when the bot is perfectly healthy.
+  Worse, the retained `schedule:` fallback keeps refreshing it roughly daily
+  after the external trigger dies, so it looks healthiest exactly when the
+  thing you are trying to diagnose has failed.
 - **cron-job.org job history** shows the HTTP status of each ping. A healthy
   ping is **204**. `401`/`403` means the token expired or was rescoped; `404`
   usually means the token lost access to the repo (a fine-grained token 404s
