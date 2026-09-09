@@ -245,7 +245,8 @@ is the `heartbeat_days` alert doing its job while the book sits fully invested.)
 
 Runs dispatched through the **GitHub API are not throttled this way**, so an
 external scheduler pinging the API keeps the ticks actually happening.
-`run-bot.yml` accepts a `repository_dispatch` event of type `tick` for this.
+`run-bot.yml` accepts a `workflow_dispatch` with an `external: true` input for
+this.
 
 **This needs no server and no third-party infrastructure beyond cron-job.org —
 cron-job.org calls the GitHub API directly.**
@@ -254,11 +255,13 @@ Setup:
 
 1. **Create a token:** GitHub → Settings → Developer settings → **Fine-grained
    tokens** → repository access: *only* `AndyRBrett/crypto-trading` →
-   Permissions → **Actions: Read and write**. Nothing else is needed. Set an
-   expiry you will actually notice, and put a reminder in your calendar — an
-   expired token is silent (see *When the trigger dies* below).
+   Permissions → **Actions: Read and write** (Metadata: read is selected for you).
+   Nothing else is needed — in particular do **not** grant Contents write; see
+   *Why this endpoint* below. Set an expiry you will actually notice, and put a
+   reminder in your calendar — an expired token is silent (see *When the trigger
+   dies* below).
 2. **Create the cron job** at [cron-job.org](https://cron-job.org):
-   - **URL:** `https://api.github.com/repos/AndyRBrett/crypto-trading/dispatches`
+   - **URL:** `https://api.github.com/repos/AndyRBrett/crypto-trading/actions/workflows/run-bot.yml/dispatches`
    - **Schedule:** every hour, at minute 30 (offset from the built-in `schedule:`
      at :00 so the two triggers do not collide)
    - **Method:** `POST`
@@ -266,11 +269,16 @@ Setup:
      - `Authorization: Bearer <your token>`
      - `Accept: application/vnd.github+json`
      - `Content-Type: application/json`
-   - **Body:** `{"event_type":"tick"}`
+   - **Body:** `{"ref":"main","inputs":{"external":"true"}}`
    - Enable "Notify on failure" so a dead token emails you.
 3. **Verify:** save, hit *Test run*, and confirm GitHub returns **204 No
-   Content** and a new run appears in the Actions tab with the trigger shown as
-   `repository_dispatch`.
+   Content** and a new run appears in the Actions tab, triggered manually,
+   with `external: true` on the run.
+
+`"external":"true"` is not optional. Without it the ping is indistinguishable
+from a human clicking *Run workflow*, which always publishes the status file —
+so an hourly ping would commit `overseer-status.json` ~24x a day and bury
+`main`'s history. `"ref":"main"` is required by the endpoint.
 
 Free tier is comfortable: unlimited jobs, 1-minute minimum interval, custom
 headers and POST bodies all included. The 30-second timeout and 64 KB response
@@ -280,11 +288,17 @@ management API, not to job executions.) GitHub Actions minutes are free and
 unlimited here because this repo is public, so going from ~7 to 24 runs a day
 costs nothing.
 
-**Why `repository_dispatch` and not `workflow_dispatch`:** the status-publish
-step always publishes on `workflow_dispatch` ("a manual run always publishes"),
-so an hourly external ping on that event would commit `overseer-status.json`
-~24x a day and bury `main`'s history. On `repository_dispatch` the normal
-`MIN_AGE_HOURS` gate applies, exactly as for a scheduled run.
+**Why this endpoint.** The other way to trigger from outside is
+`repository_dispatch` (`POST /repos/{owner}/{repo}/dispatches`), which is a
+slightly simpler request. It is avoided deliberately: that endpoint requires a
+fine-grained token with **Contents: Read and write** — a token that can push
+commits to this repo, and so (via Actions secrets) effectively own it. The
+workflow-dispatch endpoint used above needs only **Actions: Read and write**,
+which cannot modify repository contents. Since the token has to sit in a
+third-party scheduler, the narrower one is worth the extra `inputs` plumbing.
+
+This mirrors what `ufc-dashboard` does, and is the same permission split its
+`kick-scraper` function relies on.
 
 **The built-in `schedule:` block stays enabled on purpose.** In the sibling
 `ufc-dashboard` repo, cron-job.org disabled a job after 26 consecutive failures
@@ -300,10 +314,12 @@ The failure mode is silence, so check these in order:
 
 - **`last_run_at` in `overseer-status.json` is hours stale**, or Actions shows
   gaps — the dispatch is not arriving.
-- **cron-job.org job history** shows the HTTP status of each ping. `401`/`403`
-  means the token expired or was rescoped; `404` usually means the token lost
-  access to the repo (a fine-grained token 404s rather than 403s when it cannot
-  see the repository at all).
+- **cron-job.org job history** shows the HTTP status of each ping. A healthy
+  ping is **204**. `401`/`403` means the token expired or was rescoped; `404`
+  usually means the token lost access to the repo (a fine-grained token 404s
+  rather than 403s when it cannot see the repository at all) — or that
+  `run-bot.yml` is not on the default branch. `422` means the payload was
+  rejected: check `ref` and the `external` input name.
 - **Job auto-disabled** after repeated failures — re-enable it after fixing the
   token. While it is disabled the bot falls back to the throttled `schedule:`,
   so it keeps trading, just slowly.

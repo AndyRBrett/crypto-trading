@@ -14,10 +14,9 @@ on:
     # every 15 min) tend to hit during GitHub's busy periods. Cron timing is
     # best-effort and can be delayed a few minutes, which is fine here.
     - cron: "0 * * * *"
-  workflow_dispatch: {} # lets you trigger a run by hand from the Actions tab
-
-  # External scheduler (cron-job.org) pings this through the GitHub API; see
-  # "Reliable scheduling" in the README for the request it sends.
+  # Manual runs from the Actions tab, and the external scheduler (cron-job.org)
+  # pinging this through the GitHub API; see "Reliable scheduling" in the README
+  # for the exact request it sends.
   #
   # GitHub runs `schedule:` events best-effort and drops most of them under
   # load. Measured on this repo: 100 runs against 353 expected hourly slots
@@ -32,13 +31,17 @@ on:
   # failures, and because that job was the only trigger the data went stale
   # for a day. A throttled backup is worth far more than no backup.
   #
-  # Deliberately `repository_dispatch` and NOT `workflow_dispatch`: the status
-  # publish step below always publishes on `workflow_dispatch` ("a manual run
-  # always publishes"), so an hourly external ping on that event would commit
-  # overseer-status.json ~24x a day and bury main's history. On this event the
-  # normal MIN_AGE_HOURS gate applies, exactly as for a scheduled run.
-  repository_dispatch:
-    types: [tick]
+  # `workflow_dispatch` and NOT `repository_dispatch`, for least privilege: the
+  # repository-dispatch endpoint requires a token with `Contents: Read and
+  # write`, i.e. one that can push code to this repo — too much to leave sitting
+  # in a third-party scheduler. This endpoint needs only `Actions: Read and
+  # write`, which cannot modify the repository's contents.
+  workflow_dispatch:
+    inputs:
+      external:
+        description: "Automated tick from the external scheduler (keeps the daily status-publish gate)"
+        type: boolean
+        default: false
 
 # Allow the built-in token to push to gh-pages and the bot-state branch.
 permissions:
@@ -85,18 +88,24 @@ jobs:
       # ticking fine, but no hourly run ever landed in the 06:00 slot. Tying the
       # publish to elapsed time means whichever hourly run first crosses the
       # threshold does the publish, so a dropped cron slot no longer freezes it.
-      # A manual run always publishes. If the last time can't be read, we publish
-      # rather than skip — silent skipping is exactly the failure mode of #34.
+      # A HUMAN manual run always publishes. An automated tick from the external
+      # scheduler arrives on the same event, so it sets `external: true` and
+      # takes the age gate instead — otherwise the hourly ping would inherit
+      # "manual runs always publish" and commit this file ~24x a day, burying
+      # main's history. If the last time can't be read, we publish rather than
+      # skip — silent skipping is exactly the failure mode of #34.
       - name: Publish overseer status
         env:
           EVENT_NAME: ${{ github.event_name }}
+          # "true" only when the external scheduler set it; empty on schedule.
+          EXTERNAL: ${{ inputs.external }}
           # Publish once the committed status is at least this many hours old.
           # 20h (< 24) leaves margin so a slightly-earlier run the next day still
           # qualifies, while staying well under one publish per day in practice.
           MIN_AGE_HOURS: "20"
         run: |
           publish=1
-          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" != "workflow_dispatch" ] || [ "$EXTERNAL" = "true" ]; then
             last=$(jq -r '.generated_at // empty' overseer-status.json 2>/dev/null || true)
             # Guard the empty case first: GNU `date -d ""` succeeds and returns
             # "now" (age 0h -> skip), which would re-create #34's silent skip
