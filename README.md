@@ -239,13 +239,18 @@ Notes:
 > | | |
 > |---|---|
 > | cron-job.org job | `crypto-trading — hourly bot tick`, crontab `30 * * * *` |
-> | Token | fine-grained PAT `cron-job.org: crypto-trading hourly tick`, **Actions: Read and write**, this repo only |
+> | Token | fine-grained PAT `cron-job.org: crypto-trading hourly tick`, **Actions: Read and write**, this repo only, **no expiration** |
 > | First verified dispatch | run #1190, `2026-09-09T22:52:10Z`, success |
 >
 > Verified at setup: the dispatch starts a run, and the `external: true` input
 > reaches the publish gate (the run correctly did **not** commit a status file
-> 1.5h after the previous publish). **The token's expiry is the thing that will
-> eventually kill this**, silently — see *When the trigger dies*.
+> 1.5h after the previous publish).
+>
+> The token is deliberately set to **never expire**, so this will not lapse on
+> its own — the same call as `ufc-dashboard`'s `GH_DISPATCH_TOKEN`. What can
+> still kill it is revocation, rescoping, or deletion, and that failure is
+> silent: every ping 401s, GitHub records nothing at all, and the bot quietly
+> falls back to the throttled `schedule:`. See *When the trigger dies*.
 
 **GitHub's `schedule:` cron is best-effort and drops most runs under load.**
 Measured on this repo: **100 runs against 353 expected hourly slots (28%)**,
@@ -274,9 +279,10 @@ Setup (done; repeat only to rebuild or rotate):
    tokens** → repository access: *only* `AndyRBrett/crypto-trading` →
    Permissions → **Actions: Read and write** (Metadata: read is selected for you).
    Nothing else is needed — in particular do **not** grant Contents write; see
-   *Why this endpoint* below. Set an expiry you will actually notice, and put a
-   reminder in your calendar — an expired token is silent (see *When the trigger
-   dies* below).
+   *Why this endpoint* below. On expiry: the live token is set to never expire,
+   so it cannot lapse unnoticed. If you replace it with one that does expire,
+   put the date in your calendar — an expired token fails exactly like a revoked
+   one, which is to say silently (see *When the trigger dies* below).
 2. **Create the cron job** at [cron-job.org](https://cron-job.org):
    - **URL:** `https://api.github.com/repos/AndyRBrett/crypto-trading/actions/workflows/run-bot.yml/dispatches`
    - **Schedule:** every hour, at minute 30 (offset from the built-in `schedule:`
