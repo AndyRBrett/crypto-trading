@@ -232,6 +232,21 @@ Notes:
 
 ### Reliable scheduling (cron-job.org)
 
+> **Status: LIVE since 2026-09-09.** This is set up and running — the steps
+> below are kept for rebuilding it or rotating the token, not as outstanding
+> work.
+>
+> | | |
+> |---|---|
+> | cron-job.org job | `crypto-trading — hourly bot tick`, crontab `30 * * * *` |
+> | Token | fine-grained PAT `cron-job.org: crypto-trading hourly tick`, **Actions: Read and write**, this repo only |
+> | First verified dispatch | run #1190, `2026-09-09T22:52:10Z`, success |
+>
+> Verified at setup: the dispatch starts a run, and the `external: true` input
+> reaches the publish gate (the run correctly did **not** commit a status file
+> 1.5h after the previous publish). **The token's expiry is the thing that will
+> eventually kill this**, silently — see *When the trigger dies*.
+
 **GitHub's `schedule:` cron is best-effort and drops most runs under load.**
 Measured on this repo: **100 runs against 353 expected hourly slots (28%)**,
 median gap **3.2h**, worst **12.3h**. Every one of those runs *succeeded* — the
@@ -249,9 +264,11 @@ external scheduler pinging the API keeps the ticks actually happening.
 this.
 
 **This needs no server and no third-party infrastructure beyond cron-job.org —
-cron-job.org calls the GitHub API directly.**
+cron-job.org calls the GitHub API directly.** In particular it does *not* use
+Supabase, unlike the sibling `ufc-dashboard`, whose edge function exists to
+ration a paid odds API — there is no equivalent quota to guard here.
 
-Setup:
+Setup (done; repeat only to rebuild or rotate):
 
 1. **Create a token:** GitHub → Settings → Developer settings → **Fine-grained
    tokens** → repository access: *only* `AndyRBrett/crypto-trading` →
