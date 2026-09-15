@@ -224,7 +224,12 @@ explain_model: claude-opus-4-8   # falls back to a templated rationale if no API
 # signals (confirms/vetoes price-based decisions; never invents a BUY on its
 # own). Needs ANTHROPIC_API_KEY + network. Safe no-op without the key.
 sentiment_enabled: true
-sentiment_model: claude-opus-4-8
+# Scoring headlines into a single float is classification, and this is the one
+# Claude call on a schedule rather than per trade — its cost tracks how often
+# you tick, so it runs on Haiku. A score is taken once per settled bar and
+# reused within it; a product you're HOLDING keeps refreshing on the TTL below,
+# because sentiment can close a position on its own (sentiment_sell_trigger).
+sentiment_model: claude-haiku-4-5
 sentiment_cache_ttl: 1800        # seconds to reuse a score before refetching
 sentiment_max_headlines: 15
 news_feeds:

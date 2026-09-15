@@ -328,8 +328,8 @@ class RecordingAnalyzer:
     def __init__(self):
         self.calls: list = []
 
-    def analyze(self, product_id, bar_time=None):
-        self.calls.append((product_id, bar_time))
+    def analyze(self, product_id, bar_time=None, pin=True):
+        self.calls.append((product_id, bar_time, pin))
         return Sentiment(product_id, 0.5, "bullish", "ok")
 
 
@@ -358,4 +358,33 @@ def test_sentiment_is_keyed_to_the_settled_bar():
     eng.tick()
     eng.tick()
 
-    assert analyzer.calls == [("BTC-USD", int(today - day))] * 2
+    assert analyzer.calls == [("BTC-USD", int(today - day), True)] * 2
+
+
+def test_open_position_keeps_sentiment_unpinned():
+    """Sentiment can close a position on its own (apply_sentiment's risk-off
+    SELL), so a HELD product must keep refreshing inside the bar — pinning it
+    would stretch the reaction window from an hour to a day."""
+    day = 86_400
+    today = (time.time() // day) * day
+    candles = [
+        {"time": today - n * day, "open": 100.0, "high": 101.0,
+         "low": 99.0, "close": 100.0}
+        for n in range(5, -1, -1)
+    ]
+
+    eng = make_engine(candle_granularity="ONE_DAY", products=["BTC-USD"])
+    eng.storage = FakeStorage()
+    eng.market_data = FakeMarketData(candles)
+    eng.strategy = FakeStrategy(
+        Signal(product_id="BTC-USD", action=HOLD, price=100.0, indicators={"atr": 5.0})
+    )
+    analyzer = RecordingAnalyzer()
+    eng.analyzer = analyzer
+
+    eng.tick()
+    assert analyzer.calls[-1][2] is True, "flat -> pinned to the bar"
+
+    _open_long(eng, "BTC-USD", price=100.0, qty=1.0)
+    eng.tick()
+    assert analyzer.calls[-1][2] is False, "holding -> refreshes within the bar"

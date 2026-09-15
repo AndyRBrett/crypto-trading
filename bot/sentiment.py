@@ -270,26 +270,45 @@ class SentimentAnalyzer:
 
     # -- scoring -----------------------------------------------------------
 
-    def _is_fresh(self, entry: _CacheEntry, bar_time: int | None, now: float) -> bool:
-        if bar_time is not None and entry.bar_time is not None:
-            # Same settled bar -> the headlines behind the decision haven't
-            # been superseded yet. Only a scored result is pinned this way.
-            return entry.bar_time == bar_time and entry.sentiment.ok
+    def _is_fresh(
+        self, entry: _CacheEntry, bar_time: int | None, now: float, pin: bool
+    ) -> bool:
+        if pin and bar_time is not None and entry.bar_time is not None:
+            if entry.sentiment.ok:
+                # Same settled bar -> the headlines behind the decision haven't
+                # been superseded yet. A different bar re-scores even inside the
+                # TTL: the whole point is that the decision moved on.
+                return entry.bar_time == bar_time
+            # A degraded result is never pinned to the bar — but it still gets
+            # the TTL below, so the several accounts holding the same product
+            # don't each re-run a failure (and re-pay for it) within one tick.
         return now - entry.fetched_at < self.config.sentiment_cache_ttl
 
-    def analyze(self, product_id: str, bar_time: int | None = None) -> Sentiment:
+    def analyze(
+        self, product_id: str, bar_time: int | None = None, pin: bool = True
+    ) -> Sentiment:
         """Score ``product_id``, reusing the score for the settled bar.
 
         ``bar_time`` is the open timestamp of the last settled candle — the bar
         the strategy will actually decide on. Omit it to fall back to the TTL
         cache (the long-running local loop, and every existing caller).
+
+        ``pin=False`` keeps the bar key for sharing but takes the TTL path, for
+        callers that need to see news *within* the bar. Sentiment is not only an
+        entry filter: ``apply_sentiment`` turns a non-BUY into a risk-off SELL
+        below ``sentiment_sell_trigger``, so an open position can be closed by
+        news alone, and pinning that for a whole daily bar would stretch the
+        reaction window to a day. The engine unpins exactly that case.
         """
         self._ensure_loaded()
         now = time.time()
         cached = self._cache.get(product_id)
-        if cached and self._is_fresh(cached, bar_time, now):
+        if cached and self._is_fresh(cached, bar_time, now, pin):
             return cached.sentiment
         sentiment = self._analyze_uncached(product_id)
+        # The bar is recorded even when unpinned, so a refreshed score still
+        # reaches the shared file (and the other driver) rather than being
+        # rescored there.
         self._cache[product_id] = _CacheEntry(now, bar_time, sentiment)
         if bar_time is not None and sentiment.ok:
             self._dirty = True

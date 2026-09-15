@@ -114,13 +114,20 @@ for each asset (-1 bearish … +1 bullish), and folds that into the signal:
 - A strongly bearish score **triggers a risk-off SELL** of an open position
   (`sentiment_sell_trigger`).
 
-**One score per settled bar.** Sentiment only reaches the strategy at signal
-time, and signals are generated from settled candles — so a score is scored
-once per bar and reused by every tick inside it (on `ONE_DAY`, once a day
-rather than once an hour). The cloud runs `bot.main once`, a fresh process per
-tick, so those scores are shared through `sentiment.json` on the `bot-state`
-branch alongside the portfolios; the laptop and the cloud reuse each other's.
-`sentiment_cache_ttl` is the fallback window when no settled bar is available.
+**One score per settled bar — while flat.** Sentiment reaches the strategy at
+signal time, and signals are generated from settled candles, so for a product
+you're *not* holding a score is taken once per bar and reused by every tick
+inside it (on `ONE_DAY`, once a day rather than once an hour). The cloud runs
+`bot.main once`, a fresh process per tick, so those scores are shared through
+`sentiment.json` on the `bot-state` branch alongside the portfolios; the laptop
+and the cloud reuse each other's.
+
+**A held product keeps refreshing on `sentiment_cache_ttl`.** The risk-off SELL
+above is an exit sentiment can trigger *on its own*, with no price signal — so
+pinning a score to the daily bar would stretch the reaction window for bad news
+from an hour to a day. Anything with an open position is therefore re-scored on
+the TTL as before; only flat products are pinned to the bar. You pay for
+freshness exactly where a position is exposed to it.
 
 Every failure (no key, no network, no relevant headlines) degrades to neutral —
 the bot keeps trading on price alone — and a degraded result is deliberately

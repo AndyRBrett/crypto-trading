@@ -97,13 +97,59 @@ def test_new_bar_triggers_a_rescore():
     assert calls["n"] == 2
 
 
-def test_degraded_result_is_not_pinned_to_the_bar():
+def test_degraded_result_is_not_pinned_to_the_bar(monkeypatch):
     """A feed/API failure at the top of a bar must not freeze a placeholder
     neutral for the rest of the bar — the next tick retries."""
     analyzer, calls = _counting_analyzer(result=Sentiment.neutral("BTC-USD"))
+    clock = {"t": 1_000.0}
+    monkeypatch.setattr("bot.sentiment.time.time", lambda: clock["t"])
     analyzer.analyze("BTC-USD", bar_time=1_757_894_400)
+    clock["t"] += analyzer.config.sentiment_cache_ttl + 1  # next tick
     analyzer.analyze("BTC-USD", bar_time=1_757_894_400)
     assert calls["n"] == 2
+
+
+def test_degraded_result_is_reused_within_one_tick(monkeypatch):
+    """Four of the five accounts hold BTC-USD. A failure must not be re-run
+    (and, for a malformed response, re-billed) once per account in one tick —
+    the TTL still applies to degraded results even under a bar key."""
+    analyzer, calls = _counting_analyzer(result=Sentiment.neutral("BTC-USD"))
+    monkeypatch.setattr("bot.sentiment.time.time", lambda: 1_000.0)
+    for _ in range(4):  # one engine per account, same tick
+        analyzer.analyze("BTC-USD", bar_time=1_757_894_400)
+    assert calls["n"] == 1
+
+
+def test_unpinned_caller_refreshes_within_the_bar(monkeypatch):
+    """A held product must keep seeing news inside the bar: sentiment alone can
+    force a risk-off SELL, so pinning it for a day would stretch the reaction
+    window from an hour to a day."""
+    analyzer, calls = _counting_analyzer()
+    clock = {"t": 1_000.0}
+    monkeypatch.setattr("bot.sentiment.time.time", lambda: clock["t"])
+    bar = 1_757_894_400
+    analyzer.analyze("BTC-USD", bar_time=bar, pin=False)
+    clock["t"] += analyzer.config.sentiment_cache_ttl + 1  # an hour later
+    analyzer.analyze("BTC-USD", bar_time=bar, pin=False)
+    assert calls["n"] == 2  # same bar, but re-scored
+
+    # ...while a flat caller stays pinned to the bar.
+    flat, flat_calls = _counting_analyzer()
+    flat.analyze("BTC-USD", bar_time=bar)
+    clock["t"] += analyzer.config.sentiment_cache_ttl + 1
+    flat.analyze("BTC-USD", bar_time=bar)
+    assert flat_calls["n"] == 1
+
+
+def test_refreshed_score_is_still_shared(monkeypatch):
+    """An unpinned refresh keeps its bar key, so the other driver reuses the
+    fresher score instead of paying to re-derive it."""
+    monkeypatch.setattr("bot.sentiment.time.time", lambda: 1_000.0)
+    store = FakeStore()
+    analyzer, _ = _counting_analyzer(store=store)
+    analyzer.analyze("BTC-USD", bar_time=1_757_894_400, pin=False)
+    assert analyzer.flush() is True
+    assert store.state["products"]["BTC-USD"]["bar"] == 1_757_894_400
 
 
 def test_cache_survives_a_new_process():

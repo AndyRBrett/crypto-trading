@@ -195,7 +195,19 @@ class Engine:
             sentiment = None
             if self.analyzer is not None:
                 try:
-                    sentiment = self.analyzer.analyze(product_id, bar_time=bar_time)
+                    # Sentiment is not only an entry filter: apply_sentiment
+                    # turns a non-BUY into a risk-off SELL below
+                    # sentiment_sell_trigger, so an OPEN position can be closed
+                    # by news alone, with no price trigger. Pinning that to the
+                    # daily bar would stretch the reaction window from an hour
+                    # to a day — so a held product keeps refreshing within the
+                    # bar, and only a flat one is pinned. There is nothing to
+                    # risk off while flat, and entries are decided on the bar
+                    # anyway.
+                    holding = self.portfolio.position(product_id).quantity != 0
+                    sentiment = self.analyzer.analyze(
+                        product_id, bar_time=bar_time, pin=not holding
+                    )
                     # Surface *why* the score is what it is — a 0.0 can mean
                     # "no key", "no relevant headlines", or a genuine neutral read,
                     # and the summary distinguishes them.
