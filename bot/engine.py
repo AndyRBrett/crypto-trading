@@ -85,8 +85,15 @@ class Engine:
         self.strategy = make_strategy(strategy_type, config.strategy)
         self.explainer = explainer or Explainer(config)
         self.analyzer = sentiment_analyzer
+        # Whoever BUILDS the analyzer owns persisting its cache. On the
+        # multi-account path the Runner builds and flushes one shared analyzer,
+        # so the engines must not each push the same file.
+        self._owns_analyzer = False
         if self.analyzer is None and config.sentiment_enabled:
-            self.analyzer = SentimentAnalyzer(config)
+            self._owns_analyzer = True
+            self.analyzer = SentimentAnalyzer(
+                config, store=self.coordinator if self.coordinator.enabled else None
+            )
             if not config.anthropic_api_key:
                 log.warning(
                     "sentiment_enabled is set but ANTHROPIC_API_KEY is missing — "
@@ -175,10 +182,32 @@ class Engine:
                 for c in candles[-120:]
             ]
 
+            # Entries are evaluated only on *settled* candles (see below), so
+            # the settled bar is also the unit of work for sentiment: one score
+            # per bar, reused by every tick inside it.
+            signal_candles = closed_candles(candles, self.config.candle_granularity)
+            bar_time = (
+                int(signal_candles[-1]["time"])
+                if signal_candles and signal_candles[-1].get("time") is not None
+                else None
+            )
+
             sentiment = None
             if self.analyzer is not None:
                 try:
-                    sentiment = self.analyzer.analyze(product_id)
+                    # Sentiment is not only an entry filter: apply_sentiment
+                    # turns a non-BUY into a risk-off SELL below
+                    # sentiment_sell_trigger, so an OPEN position can be closed
+                    # by news alone, with no price trigger. Pinning that to the
+                    # daily bar would stretch the reaction window from an hour
+                    # to a day — so a held product keeps refreshing within the
+                    # bar, and only a flat one is pinned. There is nothing to
+                    # risk off while flat, and entries are decided on the bar
+                    # anyway.
+                    holding = self.portfolio.position(product_id).quantity != 0
+                    sentiment = self.analyzer.analyze(
+                        product_id, bar_time=bar_time, pin=not holding
+                    )
                     # Surface *why* the score is what it is — a 0.0 can mean
                     # "no key", "no relevant headlines", or a genuine neutral read,
                     # and the summary distinguishes them.
@@ -198,7 +227,8 @@ class Engine:
             # every 15 min on hourly candles would otherwise re-detect the same
             # crossover on every tick off a moving target. Protective exits below
             # still use the live price, so stops react intra-candle as intended.
-            signal_candles = closed_candles(candles, self.config.candle_granularity)
+            # (signal_candles is computed above, where the sentiment bar key
+            # is derived from the same settled bar.)
             signal = self.strategy.generate_signal(
                 product_id, signal_candles, sentiment=sentiment
             )
@@ -271,6 +301,11 @@ class Engine:
         # Surface this tick's market snapshot for the Runner's combined export.
         self.last_prices = prices
         self.last_price_history = price_history
+
+        # Share any newly scored sentiment, so the next tick (a fresh process in
+        # the cloud) and the other driver both reuse it instead of re-scoring.
+        if self._owns_analyzer and self.analyzer is not None:
+            self.analyzer.flush()
 
         # Snapshot equity using fresh prices, then export dashboard state.
         if prices:

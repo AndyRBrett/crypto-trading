@@ -198,7 +198,15 @@ class Config:
 
     # News sentiment (optional; needs ANTHROPIC_API_KEY + network).
     sentiment_enabled: bool = False
-    sentiment_model: str = "claude-opus-4-8"
+    # Scoring a dozen headlines into {score, label, one-line summary} is a
+    # classification job, not a reasoning one, and the result is squashed to a
+    # single float before it reaches the strategy. Haiku does it at a fifth of
+    # Opus's per-token price; the explanations below stay on Opus because that
+    # output is prose a human reads, and it only runs on an executed trade.
+    sentiment_model: str = "claude-haiku-4-5"
+    # Fallback reuse window, used only when no settled-bar timestamp is
+    # available (see bot/sentiment.py). The bar cache is what does the real
+    # work on the daily timeframe.
     sentiment_cache_ttl: int = 1800  # seconds to reuse a sentiment score
     sentiment_max_headlines: int = 15
     news_feeds: list[str] = field(default_factory=lambda: list(DEFAULT_FEEDS))
@@ -221,6 +229,9 @@ class Config:
     state_branch: str = "bot-state"  # shared branch holding trading.db + driver.json
     state_db_path: str = "trading.db"  # path of the shared DB on state_branch
     lease_path: str = "driver.json"  # path of the lease on state_branch
+    # Shared per-bar sentiment scores on state_branch. Market-wide, so it is one
+    # file for every account and both drivers, not a per-account table.
+    sentiment_state_path: str = "sentiment.json"
 
     # Web Push notifications through the dashboard PWA.
     # Enable from the dashboard's "Enable Notifications" button, then copy
