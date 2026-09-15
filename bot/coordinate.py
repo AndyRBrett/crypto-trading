@@ -180,6 +180,37 @@ class Coordinator:
             return False
         return self._put_file(remote, data, f"Update {account_name} portfolio [skip ci]")
 
+    # -- shared sentiment cache (sentiment.json) ---------------------------
+
+    def pull_sentiment_cache(self) -> dict | None:
+        """Read the shared per-bar sentiment scores off the state branch.
+
+        Scores are a property of the market, not of an account, so they live in
+        one small file beside the portfolios rather than in each account's DB.
+        Sharing them also means the laptop and the cloud don't each pay to score
+        the same bar.
+        """
+        if not self.enabled:
+            return None
+        path = self.config.sentiment_state_path
+        data, sha = self._get_file(path)
+        self._sha[path] = sha
+        if not data:
+            return None
+        try:
+            return json.loads(data)
+        except ValueError:
+            log.warning("coordinate: shared sentiment cache is not valid JSON.")
+            return None
+
+    def push_sentiment_cache(self, state: dict) -> bool:
+        if not self.enabled:
+            return False
+        body = json.dumps(state, indent=2, sort_keys=True).encode("utf-8")
+        return self._put_file(
+            self.config.sentiment_state_path, body, "Update sentiment cache [skip ci]"
+        )
+
     # -- lease (driver.json) ----------------------------------------------
 
     def read_lease(self) -> dict | None:

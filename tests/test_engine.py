@@ -16,6 +16,7 @@ from bot.engine import (
     SIZE_ZERO,
     Engine,
 )
+from bot.sentiment import Sentiment
 from bot.strategy import BUY, HOLD, SELL, Signal
 
 
@@ -319,3 +320,42 @@ def test_equity_snapshot_skipped_when_open_position_unpriced():
     assert len(rec.equity_snapshots) == 1
     assert rec.get_meta("last_equity_skip_at") == ""
     assert rec.get_meta("last_equity_skip_products") == ""
+
+
+class RecordingAnalyzer:
+    """Captures the bar key the engine scores sentiment against."""
+
+    def __init__(self):
+        self.calls: list = []
+
+    def analyze(self, product_id, bar_time=None):
+        self.calls.append((product_id, bar_time))
+        return Sentiment(product_id, 0.5, "bullish", "ok")
+
+
+def test_sentiment_is_keyed_to_the_settled_bar():
+    """One score per settled bar, not per tick: the engine must hand the
+    analyzer the same bar the strategy decides on, so 24 hourly ticks inside
+    one daily bar reuse a single score."""
+    day = 86_400
+    today = (time.time() // day) * day
+    # ... plus the still-forming bar for today, which must NOT be the key.
+    candles = [
+        {"time": today - n * day, "open": 100.0, "high": 101.0,
+         "low": 99.0, "close": 100.0}
+        for n in range(5, -1, -1)
+    ]
+
+    eng = make_engine(candle_granularity="ONE_DAY", products=["BTC-USD"])
+    eng.storage = FakeStorage()
+    eng.market_data = FakeMarketData(candles)
+    eng.strategy = FakeStrategy(
+        Signal(product_id="BTC-USD", action=HOLD, price=100.0, indicators={"atr": 5.0})
+    )
+    analyzer = RecordingAnalyzer()
+    eng.analyzer = analyzer
+
+    eng.tick()
+    eng.tick()
+
+    assert analyzer.calls == [("BTC-USD", int(today - day))] * 2

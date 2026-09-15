@@ -197,6 +197,12 @@ max_correlated_exposure_pct: 0.8
 # News sentiment (needs the ANTHROPIC_API_KEY Actions secret; safe no-op without).
 # When the secret is missing the bot logs a warning each tick and reports it in
 # overseer-status.json errors, so "enabled but inert" can't sit unnoticed.
+#
+# This workflow ticks hourly but decides on settled DAILY candles, so a score is
+# taken once per daily bar and reused by the other ~23 ticks — shared through
+# sentiment.json on the state branch, since each tick is a fresh process. Left
+# on the defaults (sentiment_model: claude-haiku-4-5): scoring is the only Claude
+# call on a schedule rather than per trade, so its cost tracks tick frequency.
 sentiment_enabled: true
 
 # Push notifications. Alert on every closed round trip (win AND loss) so a

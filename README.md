@@ -114,11 +114,26 @@ for each asset (-1 bearish … +1 bullish), and folds that into the signal:
 - A strongly bearish score **triggers a risk-off SELL** of an open position
   (`sentiment_sell_trigger`).
 
-Scores are cached for `sentiment_cache_ttl` seconds so short poll intervals
-don't hammer the feeds or the API, and every failure (no key, no network, no
-relevant headlines) degrades to neutral — the bot keeps trading on price alone.
-The score and Claude's one-line summary show up in the dashboard and in each
-trade's explanation.
+**One score per settled bar.** Sentiment only reaches the strategy at signal
+time, and signals are generated from settled candles — so a score is scored
+once per bar and reused by every tick inside it (on `ONE_DAY`, once a day
+rather than once an hour). The cloud runs `bot.main once`, a fresh process per
+tick, so those scores are shared through `sentiment.json` on the `bot-state`
+branch alongside the portfolios; the laptop and the cloud reuse each other's.
+`sentiment_cache_ttl` is the fallback window when no settled bar is available.
+
+Every failure (no key, no network, no relevant headlines) degrades to neutral —
+the bot keeps trading on price alone — and a degraded result is deliberately
+*not* pinned to the bar, so a feed blip is retried on the next tick instead of
+freezing a placebo neutral for the rest of the day. The score and Claude's
+one-line summary show up in the dashboard and in each trade's explanation.
+
+Scoring runs on `sentiment_model` (default `claude-haiku-4-5`): classifying a
+dozen headlines into a single float doesn't need a frontier model, and this is
+the one Claude call that fires on a schedule rather than per trade — its cost
+scales with tick frequency, not with trading activity. Explanations stay on
+`explain_model` (Opus), where the output is prose a human reads and the call
+only happens on an executed trade.
 
 ## View it on your phone
 

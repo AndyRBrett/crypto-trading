@@ -88,8 +88,14 @@ class Runner:
             config.push_subscription, config.vapid_private_key, config.vapid_claims_email
         )
         self.analyzer = sentiment_analyzer
+        # True only when this Runner built the analyzer, and so owns persisting
+        # its per-bar cache after the tick (see Engine._owns_analyzer).
+        self._owns_analyzer = False
         if self.analyzer is None and config.sentiment_enabled:
-            self.analyzer = SentimentAnalyzer(config)
+            self._owns_analyzer = True
+            self.analyzer = SentimentAnalyzer(
+                config, store=self.coordinator if self.coordinator.enabled else None
+            )
             # The Engine warns about this too, but only when IT builds the
             # analyzer — on the multi-account path the Runner builds it first, so
             # the warning never fired and sentiment sat silently neutral for
@@ -224,6 +230,10 @@ class Runner:
         if self.coordinator.enabled:
             for acct, engine in self.engines:
                 self.coordinator.push_db_for(acct.name, engine.config.db_path)
+        # One push for the whole runner: the analyzer is shared across accounts,
+        # and it is a no-op on a tick that scored nothing new.
+        if self._owns_analyzer and self.analyzer is not None:
+            self.analyzer.flush()
         return all_trades
 
     def _maybe_heartbeat(self) -> None:
