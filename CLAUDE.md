@@ -16,6 +16,14 @@ chatgpt-codex-connector[bot]; a clean pass is just a 👍 reaction.
    don't ask me first. Do not merge yet.
 2. Wait for the FIRST Codex review (comments from
    chatgpt-codex-connector[bot], or a 👍 reaction = clean pass).
+   A clean pass sends NO event: the 👍 is a reaction on the PR body,
+   and reactions never reach the subscription, so waiting on events
+   alone misses it until the next check-in. So right after opening,
+   schedule check-ins (`send_later`) at 2, 4 and 6 minutes, then
+   hourly as a backstop. On every check-in AND every event that does
+   arrive (CI finishing, a comment), read the PR's `reactions` with
+   MCP `issue_read` on the PR number — the comments calls don't
+   return them. Cancel the remaining check-ins once the review lands.
 3. Evaluate each finding yourself and act without asking me:
    - Valid and in scope → implement the fix.
    - Out of scope, style-only, or speculative → don't fix. List it
