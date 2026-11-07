@@ -54,6 +54,12 @@ concurrency:
 
 jobs:
   tick:
+    # PAUSED (2026-11-07): the bot is on hold to stop its Anthropic API spend
+    # (news sentiment + trade explanations). Every trigger -- the cron, the
+    # external scheduler's dispatch and manual runs -- now shows up as a
+    # skipped run that does no work and calls no APIs. To resume, delete this
+    # `if:` line. Open positions and trade history on bot-state are untouched.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
