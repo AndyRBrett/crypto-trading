@@ -1,5 +1,9 @@
 # crypto-trading — Paper Trading Bot 🤖
 
+> **⏸️ Paused since 2026-11-07.** The scheduled bot is switched off to stop its
+> API spend. See [PAUSED.md](PAUSED.md) for what was done, performance at the
+> time of the pause, and how to resume.
+
 A crypto **paper trading** bot: it pulls real market data from Coinbase, runs a
 technical strategy, and simulates trades against a virtual portfolio — no real
 money, ever. Each trade is explained in plain English by **Claude**, and a
