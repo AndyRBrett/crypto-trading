@@ -9,9 +9,9 @@ makes no Anthropic (Claude), Coinbase or push-notification calls.
   job-level `if: ${{ false }}` guard to `.github/workflows/run-bot.yml`. Every
   trigger now produces a skipped run that does no work: the hourly cron, the
   external scheduler's `workflow_dispatch`, and manual runs from the Actions tab.
-- The external scheduler (cron-job.org) is **not** controlled from this repo.
-  It keeps dispatching the workflow each hour until it's paused there. Each of
-  those runs is skipped and costs nothing.
+- The external scheduler's job on cron-job.org, which dispatched the workflow
+  hourly, was **paused** there on 2026-11-07. It isn't controlled from this
+  repo. Even if it fires, the guard above makes each run a no-op.
 
 ## Why
 
@@ -56,7 +56,7 @@ Buy-and-hold over the same window: BTC +19%, ETH +33%, SOL +33%.
 
 1. Delete the `if: ${{ false }}` line (and its comment block) from
    `.github/workflows/run-bot.yml`.
-2. Re-enable the cron-job.org job if it was paused.
+2. Re-enable the cron-job.org job (paused on 2026-11-07).
 3. Nothing else needs resetting. The risk breakers aren't latched: they
    recalculate from the equity curve every tick and clear themselves once
    performance recovers. Until then, new trades are made at half size. Don't
