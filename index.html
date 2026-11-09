@@ -134,6 +134,11 @@
     <p class="hint" id="exposure"></p>
   </section>
 
+  <section id="breakerSection" style="display:none">
+    <h2>Risk breaker<button class="info-btn inline" data-info="risk_breaker" aria-label="What does this mean?">i</button></h2>
+    <div id="breaker"></div>
+  </section>
+
   <div class="filter" id="filter"></div>
 
   <section>
@@ -719,7 +724,34 @@ function renderCompare(state) {
   }
 }
 
+// Accounts currently throttled by the rolling-risk breaker (issue #45) and,
+// among those, which have been stuck long enough to need manual review
+// (issue #83) — mirrors bot.breaker / write_status.py's risk_breaker block.
+// Shown regardless of the selected account tab since it's cross-account state.
+function renderBreaker(state) {
+  const section = document.getElementById("breakerSection");
+  if (!section) return;
+  const rb = state && state.risk_breaker;
+  const tripped = (rb && rb.tripped_accounts) || [];
+  if (!tripped.length) { section.style.display = "none"; return; }
+  section.style.display = "";
+  const review = new Set(rb.review_required || []);
+  const days = rb.tripped_days || {};
+  const rows = tripped.map(name => {
+    const d = days[name];
+    const flagged = review.has(name);
+    return `<tr>
+      <td><strong>${esc(name)}</strong></td>
+      <td class="mono">${d == null ? "—" : d.toFixed(1) + "d"}</td>
+      <td class="${flagged ? "neg" : ""}">${flagged ? "Needs review" : "Throttled"}</td>
+    </tr>`;
+  }).join("");
+  document.getElementById("breaker").innerHTML =
+    `<table><thead><tr><th>Account</th><th>Tripped for</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 function renderState(state) {
+  renderBreaker(state);
   if (state && Array.isArray(state.accounts)) {
     renderAccountTabs(state);
     renderCompare(state);
@@ -949,6 +981,7 @@ const INFO = {
   sentiment: { title: "Sentiment", body: "Optional news-mood score. Negative news can veto a buy or trigger a risk-off sell.", eg: "<b>Negative (−0.6)</b> → skip an otherwise-valid buy." },
   chart: { title: "Main chart", body: "With “All” selected this is your equity (account value) over time — the dashed line marks where you started. Pick a coin to switch it to that coin's 1-hour price candles with the moving averages drawn on top." },
   risk_metrics: { title: "Risk-adjusted metrics", body: "Scales return against the risk taken to earn it, so a dollar P&L becomes interpretable — is a down stretch normal variance or a real regression? Computed from the equity curve over a 30-day lookback, annualized 24/7, risk-free 0." },
+  risk_breaker: { title: "Risk breaker", body: "An account here has its rolling-risk circuit breaker tripped: trailing Sharpe and Sortino stayed below floor long enough that new entries are being sized down (or paused). “Tripped for” is how long it's been stuck; past a configurable threshold (14 days by default) it's flagged “Needs review” so capital doesn't sit parked in a disabled strategy unnoticed." },
   compare: { title: "Strategy comparison", body: "Every account side by side: equity, return, realized/unrealized P&L, win rate over completed round trips, profit factor (gross wins ÷ gross losses), 30-day max drawdown and Sharpe from each account's own equity curve, lifetime fees, and open position count. The exposure line below sums the combined long/short footprint across all accounts — they trade independently, so this is where you see them all lean the same way.", eg: "Win rate shows <b>(n=4)</b> while there are fewer than 10 round trips — too few to trust yet." },
   sharpe: { title: "Sharpe ratio", body: "Average daily return divided by its volatility, annualized. Higher is better; it rewards smooth gains and penalizes a bumpy ride.", eg: "<b>&gt; 1</b> is solid, <b>&lt; 0</b> means you lost money on average." },
   sortino: { title: "Sortino ratio", body: "Like Sharpe, but it only counts <em>downside</em> volatility — upside swings don't count against you. Blank until there's been a losing day.", eg: "A high Sortino with a lower Sharpe = gains are choppy but drawdowns are gentle." },
