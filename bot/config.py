@@ -58,6 +58,7 @@ class AccountConfig:
     risk_breaker_size_mult: float | None = None   # size scale while tripped (0 = pause)
     risk_breaker_sharpe_floor: float | None = None
     risk_breaker_sortino_floor: float | None = None
+    risk_breaker_escalation_days: int | None = None  # flag for review after this long tripped
     max_hold_days: float | None = None        # force-exit a stale position after N days
     max_hold_min_gain_pct: float | None = None  # unrealized gain that earns a reprieve
     vol_target_enabled: bool | None = None   # bound size by annualized vol contribution
@@ -155,6 +156,11 @@ class Config:
     risk_breaker_sharpe_floor: float = -1.5
     risk_breaker_sortino_floor: float = -1.5
     risk_breaker_window_days: int = 30
+    # Issue #83: capital shouldn't sit indefinitely parked in a disabled
+    # strategy without anyone noticing. Once a trip has lasted this long with
+    # no recovery, it's flagged for manual review (logged, pushed, and
+    # surfaced in overseer status) rather than silently re-measured forever.
+    risk_breaker_escalation_days: int = 14
 
     # Position aging / rotation cap (issue #52). A trade that neither stops out
     # nor reaches its target is held forever, and a full book rejects every new

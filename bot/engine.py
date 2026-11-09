@@ -491,6 +491,42 @@ class Engine:
             )
         elif state["tripped"]:
             log.info("%s", breaker.describe(state))
+        if state["tripped"]:
+            self._check_breaker_escalation()
+        elif self.storage.get_meta("risk_breaker_review_flagged"):
+            # Cleared: the next trip starts its own escalation clock.
+            self.storage.set_meta("risk_breaker_review_flagged", "")
+
+    def _check_breaker_escalation(self) -> None:
+        """Flag a persistently tripped breaker for manual review (issue #83).
+
+        The trip itself is already logged and pushed by ``_refresh_breaker``.
+        This catches the case that notification misses: a breaker that stays
+        tripped, silently re-measuring the same verdict tick after tick with
+        capital parked in a disabled strategy. Fires once per trip (latched
+        via meta, cleared on recovery above) rather than every tick.
+        """
+        changed_at = float(self.storage.get_meta("risk_breaker_changed_at") or 0.0)
+        if not changed_at or self.storage.get_meta("risk_breaker_review_flagged") == "1":
+            return
+        tripped_days = (time.time() - changed_at) / breaker.DAY_SECONDS
+        escalation_days = max(
+            1, int(getattr(self.config, "risk_breaker_escalation_days", 14) or 14)
+        )
+        if tripped_days < escalation_days:
+            return
+        self.storage.set_meta("risk_breaker_review_flagged", "1")
+        message = (
+            f"risk breaker still tripped after {tripped_days:.0f} days "
+            f"(>= {escalation_days}-day threshold) — flagging for manual review"
+        )
+        log.warning("%s", message)
+        self._notify(
+            title=f"{self._notif_prefix()}Risk breaker needs review",
+            message=message,
+            tags="warning",
+            priority="high",
+        )
 
     def _breaker_pauses_entries(self) -> bool:
         """True when the breaker is throttling new entries all the way to zero."""
