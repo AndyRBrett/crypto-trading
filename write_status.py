@@ -55,7 +55,11 @@ Two further enrichments turn raw numbers into evaluable signal:
 * ``risk_breaker`` (issue #45): the accounts whose rolling-risk circuit breaker is
   currently throttling new entries, and when each tripped. Present only while at
   least one account is throttled, so its absence means the whole book is sizing
-  normally.
+  normally. ``tripped_days`` (issue #83) is how long each has been stuck, and
+  ``review_required`` names those past ``risk_breaker_escalation_days`` (the
+  engine does the same flagging and pushes a notification once per trip, so
+  capital isn't parked in a disabled strategy indefinitely without anyone
+  noticing).
 * ``risk_metrics``: Sharpe, Sortino, max drawdown and annualized volatility over a
   30-day lookback, computed from the persisted equity curve (see ``bot/metrics.py``
   for the conventions). They scale return against the risk taken to earn it, so a
@@ -235,6 +239,7 @@ def collect_metrics(now: float | None = None) -> dict:
     config_warnings: set[str] = set()  # settings enabled but inert (missing secret)
     equity_skip_warnings: set[str] = set()  # stores currently stuck on a stale equity snapshot
     breaker_tripped: dict[str, float | None] = {}  # accounts currently throttled (issue #45)
+    breaker_review: set[str] = set()  # tripped long enough to need manual review (issue #83)
     exit_kinds: dict[str, int] = {}  # how the window's round trips ended (issue #52)
     last_notify: float | None = None   # most recent successful push, any account
 
@@ -387,6 +392,8 @@ def collect_metrics(now: float | None = None) -> dict:
                 except ValueError:
                     changed = None
                 breaker_tripped[_account_name(path)] = changed
+                if meta.get("risk_breaker_review_flagged"):
+                    breaker_review.add(_account_name(path))
             for warning in (meta.get("config_warnings") or "").splitlines():
                 if warning.strip():
                     config_warnings.add(warning.strip())
@@ -603,7 +610,15 @@ def collect_metrics(now: float | None = None) -> dict:
             "since": {
                 name: _iso(ts) for name, ts in sorted(breaker_tripped.items()) if ts
             },
+            # Issue #83: how long each account has been stuck, so a breaker
+            # tripped for 17 days reads differently from one tripped for 1.
+            "tripped_days": {
+                name: round((now - ts) / 86_400, 1)
+                for name, ts in sorted(breaker_tripped.items()) if ts
+            },
         }
+        if breaker_review:
+            status["risk_breaker"]["review_required"] = sorted(breaker_review)
     status["signals_evaluated"] = signals_evaluated
     status["signals_acted"] = signals_acted
     # Decision log (issue #23): why each evaluated signal did/didn't trade, and

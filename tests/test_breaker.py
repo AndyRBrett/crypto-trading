@@ -224,6 +224,48 @@ def test_engine_records_the_state_transition():
     assert storage.get_meta("risk_breaker_tripped") == ""
 
 
+def test_escalation_flags_review_after_threshold():
+    """Issue #83: a trip that outlasts the escalation window gets flagged."""
+    now = time.time()
+    storage = CurveStorage(_curve(BLEED, end=now))
+    eng = _engine(storage, starting_cash=10_000, risk_breaker_enabled=True,
+                  risk_breaker_days=3, risk_breaker_escalation_days=5)
+    eng._refresh_breaker()
+    assert not storage.get_meta("risk_breaker_review_flagged")
+    # Backdate the trip to simulate it having been stuck for 6 days.
+    storage.set_meta("risk_breaker_changed_at", str(now - 6 * DAY))
+    eng._refresh_breaker()
+    assert storage.get_meta("risk_breaker_review_flagged") == "1"
+
+
+def test_escalation_resets_on_recovery():
+    now = time.time()
+    storage = CurveStorage(_curve(BLEED, end=now))
+    eng = _engine(storage, starting_cash=10_000, risk_breaker_enabled=True,
+                  risk_breaker_days=3, risk_breaker_escalation_days=5)
+    eng._refresh_breaker()
+    storage.set_meta("risk_breaker_changed_at", str(now - 6 * DAY))
+    eng._refresh_breaker()
+    assert storage.get_meta("risk_breaker_review_flagged") == "1"
+    # Recovery clears both the trip and the escalation flag, so the next trip
+    # starts its own clock rather than being flagged immediately.
+    storage.curve = _curve(RECOVERY, end=now)
+    eng._refresh_breaker()
+    assert storage.get_meta("risk_breaker_tripped") == ""
+    assert not storage.get_meta("risk_breaker_review_flagged")
+
+
+def test_escalation_not_yet_due_stays_unflagged():
+    now = time.time()
+    storage = CurveStorage(_curve(BLEED, end=now))
+    eng = _engine(storage, starting_cash=10_000, risk_breaker_enabled=True,
+                  risk_breaker_days=3, risk_breaker_escalation_days=14)
+    eng._refresh_breaker()
+    storage.set_meta("risk_breaker_changed_at", str(now - 6 * DAY))
+    eng._refresh_breaker()
+    assert not storage.get_meta("risk_breaker_review_flagged")
+
+
 def test_engine_survives_an_unreadable_equity_curve():
     """A broken curve read must never be the reason a tick dies."""
     class Broken(CurveStorage):
@@ -290,6 +332,39 @@ def test_overseer_reports_tripped_accounts(tmp_path, monkeypatch):
     status = write_status.collect_metrics()
     assert status["risk_breaker"]["tripped_accounts"] == ["regime"]
     assert status["risk_breaker"]["since"]["regime"].endswith("Z")
+
+
+def test_overseer_reports_tripped_days_and_review_required(tmp_path, monkeypatch):
+    import write_status
+    from bot.storage import Storage
+
+    monkeypatch.chdir(tmp_path)
+    st = Storage("trading.regime.db")
+    st.save_equity(10_000.0, 0.0, 10_000.0)
+    st.set_meta("risk_breaker_tripped", "1")
+    st.set_meta("risk_breaker_changed_at", str(time.time() - 17 * DAY))
+    st.set_meta("risk_breaker_review_flagged", "1")
+    st.close()
+
+    status = write_status.collect_metrics()
+    rb = status["risk_breaker"]
+    assert abs(rb["tripped_days"]["regime"] - 17.0) < 0.1
+    assert rb["review_required"] == ["regime"]
+
+
+def test_overseer_omits_review_required_when_not_flagged(tmp_path, monkeypatch):
+    import write_status
+    from bot.storage import Storage
+
+    monkeypatch.chdir(tmp_path)
+    st = Storage("trading.regime.db")
+    st.save_equity(10_000.0, 0.0, 10_000.0)
+    st.set_meta("risk_breaker_tripped", "1")
+    st.set_meta("risk_breaker_changed_at", str(time.time()))
+    st.close()
+
+    status = write_status.collect_metrics()
+    assert "review_required" not in status["risk_breaker"]
 
 
 def test_overseer_omits_the_block_when_nothing_is_throttled(tmp_path, monkeypatch):
